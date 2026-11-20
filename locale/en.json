@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Changes review",
+    "description": "Uncommitted files of the project: a list with line statistics, a per-file diff and reverting a single file — without leaving DSH.",
+    "detail": "docs/DETAIL.md"
+  }
+}
