@@ -1,6 +1,6 @@
 {
   "name": "dsh-review",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Обзор незакоммиченных изменений: список файлов, построчный diff и откат одного файла — без выхода из DSH",
   "type": "module",
   "license": "MIT",
@@ -51,5 +51,6 @@
         "@deepseek-ai/dsh-client-ui-workspace"
       ]
     }
-  }
+  },
+  "icon": "./icon.svg"
 }
