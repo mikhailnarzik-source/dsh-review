@@ -17,6 +17,7 @@ window.__ModuleLoader__.load({
     const STATE_PATH = '/api/dsh-review/state'
     const DIFF_PATH = '/api/dsh-review/diff'
     const REVERT_PATH = '/api/dsh-review/revert'
+    const INIT_PATH = '/api/dsh-review/init'
 
     const en = {
       title: 'Changes review',
@@ -39,6 +40,10 @@ window.__ModuleLoader__.load({
       loading: 'Loading…',
       failed: 'Could not read changes',
       lines: 'lines',
+      noGit: 'This project is not a git repository yet.',
+      initGit: 'Create git repository',
+      initConfirm: 'Create a repository and make the first commit?',
+      initDone: 'Repository created',
     }
     const ru = {
       title: 'Ревью изменений',
@@ -61,6 +66,10 @@ window.__ModuleLoader__.load({
       loading: 'Загрузка…',
       failed: 'Не удалось получить изменения',
       lines: 'строк',
+      noGit: 'Проект пока не под git.',
+      initGit: 'Создать репозиторий git',
+      initConfirm: 'Создать репозиторий и сделать первый коммит?',
+      initDone: 'Репозиторий создан',
     }
 
     const KIND_LABEL = {
@@ -143,6 +152,7 @@ window.__ModuleLoader__.load({
       const [selected, setSelected] = React.useState(null)
       const [diff, setDiff] = React.useState([])
       const [confirm, setConfirm] = React.useState('')
+      const [notice, setNotice] = React.useState('')
 
       const load = React.useCallback(async () => {
         setLoading(true)
@@ -196,14 +206,27 @@ window.__ModuleLoader__.load({
       if (!open) {
         return h(
           'div',
-          { style: S.card },
-          h('span', { style: { fontSize: 13.5, fontWeight: 600 } }, t('heading')),
-          h('span', { style: { fontSize: 12, opacity: 0.7, lineHeight: 1.5 } }, t('hint')),
-          h('div', { style: S.row }, h('button', { style: S.button, onClick: () => setOpen(true) }, t('open'))),
+          {
+            style: {
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '6px 10px',
+              borderRadius: 8,
+              border: '1px solid rgba(128,128,128,0.22)',
+              background: 'rgba(128,128,128,0.05)',
+              fontSize: 13,
+            },
+          },
+          h('span', { style: { fontWeight: 600 } }, t('heading')),
+          h('span', { style: { fontSize: 12, opacity: 0.6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, t('hint')),
+          h('button', { style: { ...S.button, marginLeft: 'auto', flex: '0 0 auto' }, onClick: () => setOpen(true) }, t('open')),
         )
       }
 
       const files = state?.files ?? []
+
+      const noticeLine = notice !== '' ? h('span', { style: { fontSize: 12, opacity: 0.75 } }, notice) : null
 
       return h(
         'div',
@@ -222,7 +245,43 @@ window.__ModuleLoader__.load({
               )
             : null,
         ),
-        error !== '' ? h('span', { style: { fontSize: 12, color: '#d1242f' } }, error) : null,
+        noticeLine,
+        error !== ''
+          ? h(
+              'div',
+              { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+              h('span', { style: { fontSize: 12, color: '#d1242f' } }, error),
+              h('span', { style: { fontSize: 12, opacity: 0.7 } }, t('noGit')),
+              confirm === '__init__'
+                ? h(
+                    'div',
+                    { style: S.row },
+                    h('span', { style: { fontSize: 12 } }, t('initConfirm')),
+                    h(
+                      'button',
+                      {
+                        style: S.danger,
+                        onClick: async () => {
+                          try {
+                            const result = await post(INIT_PATH, { confirm: true })
+                            if (result?.ok === true) {
+                              setError('')
+                              setConfirm('')
+                              setNotice(t('initDone'))
+                              await load()
+                            } else setError(String(result?.message ?? ''))
+                          } catch (cause) {
+                            setError(String(cause?.message ?? cause))
+                          }
+                        },
+                      },
+                      t('yes'),
+                    ),
+                    h('button', { style: S.button, onClick: () => setConfirm('') }, t('no')),
+                  )
+                : h('button', { style: S.button, onClick: () => setConfirm('__init__') }, t('initGit')),
+            )
+          : null,
         state !== null && files.length === 0 ? h('span', { style: { fontSize: 12, opacity: 0.7 } }, t('empty')) : null,
         ...files.map((file) =>
           h(

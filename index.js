@@ -13,6 +13,7 @@ export const inject = ['tools', 'sessionPersistence', 'connection', 'workspaceRe
 const STATE_PATH = '/api/dsh-review/state'
 const DIFF_PATH = '/api/dsh-review/diff'
 const REVERT_PATH = '/api/dsh-review/revert'
+const INIT_PATH = '/api/dsh-review/init'
 
 /** Каталог проекта: первый рабочий каталог из реестра или текущий. */
 async function projectDir(ctx) {
@@ -72,6 +73,24 @@ export function apply(ctx) {
             if (typeof body.path !== 'string' || body.path === '') return json({ ok: false, message: 'не указан файл' })
             const lines = await readDiff(dir, body.path)
             return json({ ok: true, path: body.path, lines })
+          } catch (error) {
+            return json({ ok: false, message: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      })
+
+      ctx.connection.fetch.register({
+        path: INIT_PATH,
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: async (request) => {
+          try {
+            const body = await readBody(request)
+            if (body.confirm !== true) return json({ ok: false, message: 'нужно подтверждение' })
+            const dir = await projectDir(ctx)
+            const { initRepository } = await import('./lib/changes.mjs')
+            const result = await initRepository(dir)
+            return json({ ok: true, ...result })
           } catch (error) {
             return json({ ok: false, message: error instanceof Error ? error.message : String(error) })
           }
