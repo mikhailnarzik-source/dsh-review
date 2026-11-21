@@ -82,7 +82,7 @@ window.__ModuleLoader__.load({
     }
 
     const S = {
-      card: { display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13, maxWidth: 720 },
+      card: { position: 'relative', paddingRight: 44, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13, maxWidth: 720 },
       row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
       file: {
         display: 'flex',
@@ -173,8 +173,10 @@ window.__ModuleLoader__.load({
           'aria-label': open ? 'Свернуть' : 'Открыть',
           'aria-expanded': open ? 'true' : 'false',
           style: {
-            marginLeft: 'auto',
-            flex: '0 0 auto',
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            zIndex: 2,
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',

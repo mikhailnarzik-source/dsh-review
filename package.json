@@ -1,6 +1,6 @@
 {
   "name": "dsh-review",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Обзор незакоммиченных изменений: список файлов, построчный diff и откат одного файла — без выхода из DSH",
   "type": "module",
   "license": "MIT",
