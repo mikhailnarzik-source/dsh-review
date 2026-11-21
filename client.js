@@ -143,7 +143,27 @@ window.__ModuleLoader__.load({
       return response.json()
     }
 
-    function ChangesCard() {
+        /** Рамка карточки: тот же вид, что у остальных наших плагинов. */
+    function CardFrame({ children }) {
+      return h(
+        'div',
+        {
+          style: {
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            padding: '10px 12px',
+            borderRadius: 10,
+            border: '1px solid rgba(128,128,128,0.28)',
+            background: 'rgba(128,128,128,0.07)',
+            boxSizing: 'border-box',
+          },
+        },
+        children,
+      )
+    }
+
+function ChangesCard() {
       const t = (key) => translate(key)
       const [open, setOpen] = React.useState(false)
       const [state, setState] = React.useState(null)
@@ -378,7 +398,7 @@ window.__ModuleLoader__.load({
               label: () => translate('title'),
               locale: NS,
             },
-            ChangesCard,
+            () => h(CardFrame, null, h(ChangesCard)),
           ),
         )
       } catch (error) {
