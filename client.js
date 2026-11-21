@@ -441,23 +441,40 @@ function ChangesCard() {
       )
     }
 
+    /** Содержимое карточки на странице своего плагина. */
+    function DetailCard_dshreview(props) {
+      const subject = props?.subject
+      const packageName =
+        subject?.kind === 'bundle' && typeof subject?.pkg?.name === 'string'
+          ? subject.pkg.name
+          : typeof subject?.id === 'string'
+            ? subject.id
+            : ''
+      if (packageName !== 'dsh-review') return null
+      const content = () => h(CardFrame, null, h(ChangesCard))
+      return typeof content === 'function' ? content(props) : content
+    }
+
     function apply(ctx) {
       ctx.locale.register(NS, { en, ru })
       translate = ctx.locale.bind(NS)
 
       try {
-        ctx.slots.inject('plugins.item', () =>
+              try {
+        ctx.slots.inject('plugins.detail.section', () =>
           ctx.slots.register(
             {
-              name: 'plugins.item',
-              id: 'dsh-review',
-              order: 59,
-              label: () => translate('title'),
+              name: 'plugins.detail.section',
+              id: 'dsh-review-detail',
+              order: 45,
               locale: NS,
             },
-            () => h(CardFrame, null, h(ChangesCard)),
+            DetailCard_dshreview,
           ),
         )
+      } catch (error) {
+        console.error('[dsh-review] секция страницы недоступна:', error)
+      }
       } catch (error) {
         console.error('[dsh-review] карточка недоступна:', error)
       }
