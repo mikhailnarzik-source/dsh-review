@@ -297,14 +297,18 @@ function ChangesCard() {
       const noticeLine = notice !== '' ? h('span', { style: { fontSize: 12, opacity: 0.75 } }, notice) : null
 
       return h(
+      'div',
+      { style: S.card },
+      h(
         'div',
-        { style: S.card },
+        { style: { display: 'flex', alignItems: 'center', gap: 10 } },
         h('span', { style: { fontSize: 13.5, fontWeight: 600 } }, t('heading')),
+        h(ToggleIcon, { open: true, onClick: () => setOpen(false) }),
+      ),
         h(
           'div',
           { style: S.row },
           h('button', { style: S.button, onClick: () => void load() }, loading ? t('loading') : t('refresh')),
-h(ToggleIcon, { open: true, onClick: () => setOpen(false) }),
           state !== null
             ? h(
                 'span',
