@@ -273,3 +273,12 @@ node --test test/changes.test.mjs test/tests.test.mjs test/projects.test.mjs `
 создание PR с mock fetch, регистрация инструментов и маршрутов, а также рендер:
 колонка «Проекта» с подписью отдельно и полем на всю ширину, три кнопки в один
 ряд, чипы-кнопки 32/36 с точкой-индикатором и адаптив на 1280/1024/768/480 px.
+
+## Прокрутка страниц
+
+Ревью: корень `.dshrv-page` (main-панель и секция `plugins.detail.section`) прокручивается по вертикали, если контент выше окна. Корень не имеет фиксированной высоты в px:
+`box-sizing:border-box; width:100%; min-height:0; max-height:100%; overflow-y:auto; overscroll-behavior:contain; padding-bottom` (+ `flex:1 1 auto` для flex-родителя), вложенные блоки с `max-height` прокручиваются внутри.
+
+Проверено headless на высотах окна 700/800 px и ширинах 1280/1024/768/480 px: страница докручивается до последнего элемента (`bottomReachable`), горизонтальной прокрутки страницы нет.
+
+Тест: `node --test test/scroll.test.mjs`.
