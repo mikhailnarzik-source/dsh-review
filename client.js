@@ -20,6 +20,7 @@ window.__ModuleLoader__.load({
     const INIT_PATH = '/api/dsh-review/init'
     const PROJECTS_PATH = '/api/dsh-review/projects'
     const TESTS_PATH = '/api/dsh-review/tests-run'
+    const GIT_STATUS_PATH = '/api/dsh-review/git-status'
     const COMMIT_PATH = '/api/dsh-review/git-commit'
     const PUSH_PATH = '/api/dsh-review/git-push'
 
@@ -78,6 +79,11 @@ window.__ModuleLoader__.load({
       needChooseProject: 'Several test directories found — choose one in the list.',
       projectDirResult: 'directory',
       projectsFailed: 'Could not list test directories',
+      gitStatusFailed: 'Could not read git status',
+      repoLabel: 'repo',
+      warningsLabel: 'warnings',
+      requestTimeout: 'Request timeout',
+      hashLabel: 'hash',
     }
     const ru = {
       title: 'Ревью изменений',
@@ -134,6 +140,11 @@ window.__ModuleLoader__.load({
       needChooseProject: 'Несколько каталогов с тестами — выберите один в списке.',
       projectDirResult: 'каталог',
       projectsFailed: 'Не удалось получить список каталогов',
+      gitStatusFailed: 'Не удалось получить состояние git',
+      repoLabel: 'репозиторий',
+      warningsLabel: 'предупреждения',
+      requestTimeout: 'Таймаут запроса',
+      hashLabel: 'hash',
     }
 
     const KIND_LABEL = {
@@ -239,14 +250,34 @@ window.__ModuleLoader__.load({
 
     let translate = (key) => key
 
-    async function post(path, payload) {
-      const response = await fetch(path, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload ?? {}),
-      })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      return response.json()
+    /**
+     * POST с таймаутом: даже зависший host-запрос не оставляет кнопку
+     * в состоянии «Выполняется…» навсегда.
+     * @param {string} path маршрут
+     * @param {unknown} payload тело
+     * @param {number} timeoutMs таймаут, по умолчанию 180 с
+     */
+    async function post(path, payload, timeoutMs = 180000) {
+      const controller = typeof AbortController === 'function' ? new AbortController() : null
+      const timer = controller !== null ? setTimeout(() => controller.abort(), timeoutMs) : null
+      try {
+        const response = await fetch(path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload ?? {}),
+          ...(controller !== null ? { signal: controller.signal } : {}),
+        })
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        return await response.json()
+      } catch (cause) {
+        if (cause?.name === 'AbortError') {
+          const seconds = Math.round(timeoutMs / 1000)
+          throw new Error(`${translate('requestTimeout')} (${seconds} ${translate('sec')})`)
+        }
+        throw cause
+      } finally {
+        if (timer !== null) clearTimeout(timer)
+      }
     }
 
         /** Рамка карточки: тот же вид, что у остальных наших плагинов. */
@@ -487,25 +518,42 @@ function ChangesCard() {
         }
       }
 
-      // Шаг 1 commit+push: свежий список файлов и обязательное подтверждение.
+      // Шаг 1 commit+push: git-status выбранного каталога и обязательное подтверждение.
       const beginCommitAndPush = async () => {
         if (action !== '') return
         setAction('prepare')
         setActionResult(null)
         setNotice('')
         try {
-          const snapshot = await post(STATE_PATH, {})
-          if (snapshot?.ok !== true) {
-            setActionResult({ ok: false, title: String(snapshot?.message ?? t('failed')), details: [], output: '', truncated: false })
+          const dir = selectedDir !== '' ? selectedDir : '.'
+          const status = await post(GIT_STATUS_PATH, { dir })
+          if (status?.ok !== true) {
+            const details = [`${t('projectDirResult')}: ${dirLabel(dir)}`]
+            if (typeof status?.repo === 'string' && status.repo !== '') details.push(`${t('repoLabel')}: ${status.repo}`)
+            setActionResult({
+              ok: false,
+              title: String(status?.message ?? t('gitStatusFailed')),
+              details,
+              output: '',
+              truncated: false,
+            })
             return
           }
-          setState(snapshot)
-          const paths = (snapshot.files ?? []).map(file => file.path)
-          if (paths.length === 0) {
+          const files = Array.isArray(status.files) ? status.files : []
+          const total = Number.isFinite(status.total) ? status.total : files.length
+          if (total === 0) {
             setNotice(t('noChanges'))
             return
           }
-          setPending({ files: paths, message: '' })
+          setPending({
+            dir,
+            repo: typeof status.repo === 'string' ? status.repo : '',
+            branch: typeof status.branch === 'string' ? status.branch : '',
+            files,
+            total,
+            warnings: Array.isArray(status.warnings) ? status.warnings : [],
+            message: '',
+          })
         } catch (cause) {
           setActionResult({ ok: false, title: String(cause?.message ?? cause), details: [], output: '', truncated: false })
         } finally {
@@ -525,27 +573,40 @@ function ChangesCard() {
         setNotice('')
         setActionResult(null)
         try {
-          const commit = await post(COMMIT_PATH, { message, paths: 'all', confirm: true })
+          const commit = await post(COMMIT_PATH, { dir: pending.dir, message, paths: 'all', confirm: true })
           if (commit?.ok !== true) {
+            const details = []
+            if (typeof commit?.repo === 'string' && commit.repo !== '') {
+              details.push(`${t('repoLabel')}: ${commit.repo}${commit?.branch ? ` (${commit.branch})` : ''}`)
+            }
+            if (Array.isArray(commit?.files) && commit.files.length > 0) {
+              details.push(`${commit.files.length} ${t('filesCount')}: ${commit.files.slice(0, 10).join(', ')}`)
+            }
             setActionResult({
               ok: false,
               title: String(commit?.message ?? t('commitFailed')),
-              details: Array.isArray(commit?.files) && commit.files.length > 0
-                ? [`${commit.files.length} ${t('filesCount')}: ${commit.files.slice(0, 10).join(', ')}`]
-                : [],
+              details,
               output: typeof commit?.output === 'string' ? commit.output : '',
               truncated: false,
             })
             await load()
             return
           }
-          const push = await post(PUSH_PATH, { confirm: true })
+
+          // Коммит уже создан: ошибку push показываем результатом, а не исключением.
+          let push
+          try {
+            push = await post(PUSH_PATH, { dir: pending.dir, confirm: true })
+          } catch (cause) {
+            push = { ok: false, message: String(cause?.message ?? cause) }
+          }
           const ok = push?.ok === true
           setActionResult({
             ok,
             title: ok ? t('pushed') : `${t('commitCreated')} ✓ / ${t('pushFailed')}`,
             details: [
-              `${t('commitCreated')}: ${commit?.commit ?? '—'}; ${t('filesCount')}: ${Array.isArray(commit?.files) ? commit.files.length : 0}`,
+              `${t('repoLabel')}: ${commit?.repo ?? '—'}${commit?.branch ? ` (${commit.branch})` : ''}`,
+              `${t('commitCreated')}: ${commit?.hash ?? commit?.commit ?? '—'}; ${t('filesCount')}: ${commit?.total ?? (Array.isArray(commit?.files) ? commit.files.length : 0)}`,
               `${t('remoteLabel')}: ${push?.remote ?? '—'}; ${t('branchLabel')}: ${push?.branch ?? '—'}; ${t('codeLabel')}: ${push?.exitCode ?? '—'}`,
               ...ok ? [] : [String(push?.message ?? '')],
             ],
@@ -555,7 +616,13 @@ function ChangesCard() {
           setPending(null)
           await load()
         } catch (cause) {
-          setActionResult({ ok: false, title: String(cause?.message ?? cause), details: [], output: '', truncated: false })
+          setActionResult({
+            ok: false,
+            title: String(cause?.message ?? cause),
+            details: pending.repo !== '' ? [`${t('repoLabel')}: ${pending.repo}${pending.branch !== '' ? ` (${pending.branch})` : ''}`] : [],
+            output: '',
+            truncated: false,
+          })
           await load()
         } finally {
           setAction('')
@@ -640,12 +707,14 @@ function ChangesCard() {
             h(
               'span',
               { style: { fontSize: 12.5, fontWeight: 600 } },
-              `${t('confirmCommitPush')} ${pending.files.length} ${t('filesCount')}`,
+              `${t('confirmCommitPush')} ${t('repoLabel')}: ${pending.repo || '—'}${pending.branch !== '' ? ` (${pending.branch})` : ''} — ${pending.total} ${t('filesCount')}`,
             ),
+            h('span', { style: S.muted }, `${t('projectDirResult')}: ${dirLabel(pending.dir)}`),
+            ...pending.warnings.map((line, index) => h('span', { key: `warning-${index}`, style: { fontSize: 12, color: '#d1242f' } }, line)),
             h(
               'pre',
               { style: S.fileName },
-              pending.files.slice(0, 20).join('\n') + (pending.files.length > 20 ? `\n… +${pending.files.length - 20}` : ''),
+              pending.files.slice(0, 20).join('\n') + (pending.total > Math.min(pending.files.length, 20) ? `\n… +${pending.total - Math.min(pending.files.length, 20)}` : ''),
             ),
             h('input', {
               style: S.input,

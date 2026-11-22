@@ -59,8 +59,10 @@ test('index.js регистрирует инструменты и POST-марш�
 
   const commit = ctx.toolsList.find(tool => tool.name === 'git_commit')
   assert.deepEqual(commit.parameters.required, ['message', 'confirm'])
+  assert.ok(commit.parameters.properties.dir, 'git_commit: параметр dir')
   const push = ctx.toolsList.find(tool => tool.name === 'git_push')
   assert.deepEqual(push.parameters.required, ['confirm'])
+  assert.ok(push.parameters.properties.dir, 'git_push: параметр dir')
   const tests = ctx.toolsList.find(tool => tool.name === 'tests_run')
   assert.equal('required' in tests.parameters, false)
   assert.ok(tests.parameters.properties.dir, 'tests_run: параметр dir')
@@ -71,6 +73,7 @@ test('index.js регистрирует инструменты и POST-марш�
     '/api/dsh-review/diff',
     '/api/dsh-review/git-commit',
     '/api/dsh-review/git-push',
+    '/api/dsh-review/git-status',
     '/api/dsh-review/init',
     '/api/dsh-review/projects',
     '/api/dsh-review/revert',
@@ -190,6 +193,28 @@ test('маршрут tests-run без dir при нескольких канди
   }
 })
 
+test('маршрут git-status возвращает репозиторий и файлы выбранного каталога', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'review-route-git-status-'))
+  try {
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: dir })
+    await run('git', ['config', 'user.name', 'test'], { cwd: dir })
+    await run('git', ['config', 'user.email', 'test@example.com'], { cwd: dir })
+    await writeFile(join(dir, 'app.js'), 'const value = 1\n', 'utf8')
+    const module = await import('../index.js')
+    const ctx = fakeContext({ projectDir: dir })
+    module.apply(ctx)
+    const payload = await callRoute(ctx, '/api/dsh-review/git-status', { dir: '.' })
+    assert.equal(payload.ok, true)
+    assert.equal(payload.repo, '.')
+    assert.equal(payload.branch, 'main')
+    assert.deepEqual(payload.files, ['app.js'])
+    assert.equal(payload.total, 1)
+    assert.deepEqual(payload.warnings, [])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('маршрут git-commit делает коммит после confirm:true', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'review-route-commit-'))
   try {
@@ -201,12 +226,16 @@ test('маршрут git-commit делает коммит после confirm:tru
     const ctx = fakeContext({ projectDir: dir })
     module.apply(ctx)
     const payload = await callRoute(ctx, '/api/dsh-review/git-commit', {
+      dir: '.',
       message: 'route commit',
       paths: 'all',
       confirm: true,
     })
     assert.equal(payload.ok, true)
+    assert.equal(payload.repo, '.')
+    assert.equal(payload.branch, 'main')
     assert.ok(payload.files.includes('app.js'))
+    assert.equal(typeof payload.hash, 'string')
     const log = await run('git', ['log', '-1', '--pretty=%s'], { cwd: dir })
     assert.equal(String(log.stdout).trim(), 'route commit')
 

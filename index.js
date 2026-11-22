@@ -7,7 +7,7 @@
  */
 import { readChanges, readDiff, revertFile, initRepository } from './lib/changes.mjs'
 import { runTests, detectProjects } from './lib/tests.mjs'
-import { commitChanges, pushChanges } from './lib/git.mjs'
+import { commitChanges, pushChanges, gitStatus } from './lib/git.mjs'
 
 export const name = 'dsh-review'
 export const inject = ['tools', 'sessionPersistence', 'connection', 'workspaceRegistry']
@@ -18,6 +18,7 @@ const REVERT_PATH = '/api/dsh-review/revert'
 const INIT_PATH = '/api/dsh-review/init'
 const PROJECTS_PATH = '/api/dsh-review/projects'
 const TESTS_PATH = '/api/dsh-review/tests-run'
+const GIT_STATUS_PATH = '/api/dsh-review/git-status'
 const COMMIT_PATH = '/api/dsh-review/git-commit'
 const PUSH_PATH = '/api/dsh-review/git-push'
 
@@ -138,8 +139,11 @@ function formatTests(result) {
 function formatCommit(result) {
   const lines = [result?.ok === true ? 'КОММИТ СОЗДАН' : `КОММИТ НЕ СОЗДАН: ${result?.message ?? 'причина неизвестна'}`]
   const files = Array.isArray(result?.files) ? result.files : []
-  lines.push(`файлов изменено: ${files.length}${result?.commit ? `; коммит: ${result.commit}` : ''}`)
-  if (files.length > 0) lines.push(...files.map(path => `- ${path}`))
+  const total = Number.isFinite(result?.total) ? result.total : files.length
+  lines.push(`репозиторий: ${result?.repo ?? '—'}; ветка: ${result?.branch ?? '—'}; файлов: ${total}${result?.hash ? `; hash: ${result.hash}` : ''}`)
+  if (files.length > 0) lines.push(...files.slice(0, 50).map(path => `- ${path}`))
+  if (total > files.slice(0, 50).length) lines.push(`… и ещё ${total - files.slice(0, 50).length}`)
+  if (Array.isArray(result?.warnings) && result.warnings.length > 0) lines.push(`предупреждения: ${result.warnings.join('; ')}`)
   if (typeof result?.output === 'string' && result.output !== '') lines.push(result.output)
   return clipText(lines.join('\n'))
 }
@@ -148,9 +152,9 @@ function formatCommit(result) {
 function formatPush(result) {
   const lines = [
     result?.ok === true
-      ? `PUSH ВЫПОЛНЕН: ${result?.remote ?? '—'}/${result?.branch ?? '—'}`
+      ? `PUSH ВЫПОЛНЕН: ${result?.repo ?? '—'} → ${result?.remote ?? '—'}/${result?.branch ?? '—'}`
       : `PUSH НЕ ВЫПОЛНЕН: ${result?.message ?? 'причина неизвестна'}`,
-    `remote: ${result?.remote ?? '—'}; branch: ${result?.branch ?? '—'}; код: ${result?.exitCode ?? '—'}${result?.protectedBranch === true ? '; защищённая ветка (main/master), подтверждение запрошено' : ''}`,
+    `репозиторий: ${result?.repo ?? '—'}; remote: ${result?.remote ?? '—'}; branch: ${result?.branch ?? '—'}; код: ${result?.exitCode ?? '—'}${result?.protectedBranch === true ? '; защищённая ветка (main/master), подтверждение запрошено' : ''}`,
   ]
   if (typeof result?.output === 'string' && result.output !== '') lines.push(result.output)
   return clipText(lines.join('\n'))
@@ -275,14 +279,36 @@ export function apply(ctx) {
       })
 
       ctx.connection.fetch.register({
+        path: GIT_STATUS_PATH,
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: async (request) => {
+          try {
+            const body = await readBody(request)
+            const root = await projectDir(ctx)
+            const result = await gitStatus({ rootDir: root, dir: body.dir })
+            return json(result)
+          } catch (error) {
+            return json({ ok: false, message: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      })
+
+      ctx.connection.fetch.register({
         path: COMMIT_PATH,
         methods: ['POST'],
         requestBody: 'buffered',
         fetch: async (request) => {
           try {
             const body = await readBody(request)
-            const dir = await projectDir(ctx)
-            const result = await commitChanges(dir, body)
+            const root = await projectDir(ctx)
+            const result = await commitChanges({
+              rootDir: root,
+              dir: body.dir,
+              message: body.message,
+              paths: body.paths,
+              confirm: body.confirm,
+            })
             return json(result)
           } catch (error) {
             return json({ ok: false, message: error instanceof Error ? error.message : String(error) })
@@ -297,8 +323,14 @@ export function apply(ctx) {
         fetch: async (request) => {
           try {
             const body = await readBody(request)
-            const dir = await projectDir(ctx)
-            const result = await pushChanges(dir, body)
+            const root = await projectDir(ctx)
+            const result = await pushChanges({
+              rootDir: root,
+              dir: body.dir,
+              remote: body.remote,
+              branch: body.branch,
+              confirm: body.confirm,
+            })
             return json(result)
           } catch (error) {
             return json({ ok: false, message: error instanceof Error ? error.message : String(error) })
@@ -372,10 +404,14 @@ export function apply(ctx) {
   try {
     ctx.tools.register({
       name: 'git_commit',
-      description: 'Создать коммит изменений проекта. Требует confirm: true; проверяет список изменённых файлов и отказывается коммитить файлы, похожие на секреты (.env, *.key, *secret*, credentials*, *.pem).',
+      description: 'Создать коммит изменений в git-репозитории выбранного каталога (корень репозитория определяется через git rev-parse). Требует confirm: true; отказывается от секретов (.env, *.key, *secret*, credentials*, *.pem), опасных путей (node_modules/, .npm-cache/, .pnpm-store/, .artifacts/, *.log) и слишком большого числа файлов; git add/commit идут с таймаутом.',
       parameters: {
         type: 'object',
         properties: {
+          dir: {
+            type: 'string',
+            description: 'Каталог проекта относительно корня воркспейса, например ".publish/dsh-review"; "." — корень. Коммит выполняется в его git-репозитории.',
+          },
           message: { type: 'string', description: 'Сообщение коммита.' },
           paths: {
             description: "Пути для индексации (массив) или 'all' — все изменения.",
@@ -390,8 +426,14 @@ export function apply(ctx) {
       },
       output: TEXT_OUTPUT,
       async execute(input) {
-        const dir = await projectDir(ctx)
-        const result = await commitChanges(dir, input)
+        const root = await projectDir(ctx)
+        const result = await commitChanges({
+          rootDir: root,
+          dir: input?.dir,
+          message: input?.message,
+          paths: input?.paths,
+          confirm: input?.confirm,
+        })
         return assertOk(result, formatCommit)
       },
     })
@@ -402,20 +444,30 @@ export function apply(ctx) {
   try {
     ctx.tools.register({
       name: 'git_push',
-      description: 'Отправить текущую ветку в remote (по умолчанию origin). Требует confirm: true, никогда не делает force push; возвращает remote, ветку и итог.',
+      description: 'Отправить ветку в remote (по умолчанию origin) из git-репозитория выбранного каталога. Требует confirm: true, никогда не делает force push; возвращает repo, remote, ветку и итог.',
       parameters: {
         type: 'object',
         properties: {
+          dir: {
+            type: 'string',
+            description: 'Каталог проекта относительно корня воркспейса, например ".publish/dsh-review"; "." — корень. Push выполняется в его git-репозитории.',
+          },
           confirm: { type: 'boolean', description: 'Обязательно true: подтверждение push.' },
           remote: { type: 'string', description: 'Имя remote, по умолчанию origin.' },
-          branch: { type: 'string', description: 'Ветка; по умолчанию текущая ветка проекта.' },
+          branch: { type: 'string', description: 'Ветка; по умолчанию текущая ветка репозитория.' },
         },
         required: ['confirm'],
       },
       output: TEXT_OUTPUT,
       async execute(input) {
-        const dir = await projectDir(ctx)
-        const result = await pushChanges(dir, input)
+        const root = await projectDir(ctx)
+        const result = await pushChanges({
+          rootDir: root,
+          dir: input?.dir,
+          remote: input?.remote,
+          branch: input?.branch,
+          confirm: input?.confirm,
+        })
         return assertOk(result, formatPush)
       },
     })
