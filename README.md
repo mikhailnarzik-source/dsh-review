@@ -1,6 +1,6 @@
 # dsh-review
 
-Ревью изменений, тесты и аккуратный коммит/push прямо в DSH.
+Ревью изменений, тесты, коммит/push и создание PR прямо в DSH.
 
 ## Что делает
 
@@ -10,12 +10,15 @@
 - **прогоняет тесты проекта**: каталог выбирается из найденных, команда
   определяется автоматически, вывод обрезается до начала и хвоста;
 - **коммитит и пушит**: сначала коммит, затем `git push`, с подтверждением и списком файлов;
-- даёт агенту инструменты `changes_review`, `tests_run`, `git_commit`, `git_push`.
+- показывает **ветку и ahead/behind** выбранного каталога и создаёт **pull request**
+  через GitHub API с предзаполненными title/body/base;
+- даёт агенту инструменты `changes_review`, `tests_run`, `git_commit`,
+  `git_push`, `branch_info`, `pr_create`.
 
 ## Где смотреть
 
 Плагины → «Ревью изменений». Карточка свёрнута по умолчанию: одна кнопка «Открыть».
-В развёрнутой карточке — «Прогнать тесты» и «Закоммитить и запушить».
+В развёрнутой карточке — «Прогнать тесты», «Закоммитить и запушить» и «Создать PR».
 
 ## Тесты
 
@@ -74,6 +77,25 @@ pytest, dotnet, maven).
   выбранного каталога и поле сообщения — без явного «Подтвердить» ничего не
   отправляется.
 
+## Ветки и PR
+
+- В секции показывается строка «Ветка: `<branch>` · `<ahead>`↑/`<behind>`↓» для
+  выбранного каталога; рядом с кнопками — «Создать PR».
+- `branch_info`/`/api/dsh-review/branch-info` возвращает ветку, remote origin,
+  upstream, ahead/behind, base-ветку (`origin/HEAD`, иначе `main`), последние
+  коммиты `base..HEAD` и признак GitHub-remote.
+- «Создать PR» открывает панель подтверждения: title (имя ветки, `_` → пробел),
+  body (git log `base..HEAD`, до 20 строк), base и head можно поправить. Если
+  ветка совпадает с base или origin не GitHub — предупреждение; без подтверждения
+  ничего не создаётся.
+- Создание идёт через GitHub API: проверяется существующий открытый PR для
+  `owner:head` и возвращается как `existing`, иначе POST `/repos/owner/repo/pulls`.
+  Ответ — «PR #N создан (или уже существует)» со ссылкой; ошибки 401/403/404/422
+  переводятся на русский.
+- Токен берётся из credential store DSH (`GITHUB_TOKEN`); если не сохранён —
+  подсказка «Настройки → Плагины → GitHub». Сеть — только `https://api.github.com`,
+  запросы ограничены таймаутом 60 с.
+
 ## Маршруты
 
 Все — `POST`, ответ JSON:
@@ -89,13 +111,17 @@ pytest, dotnet, maven).
 | `/api/dsh-review/git-status` | репозиторий выбранного каталога (`dir`): `{ ok, repo, branch, files, warnings }` |
 | `/api/dsh-review/git-commit` | коммит (`dir?`, `message`, `paths?`, `confirm: true`) |
 | `/api/dsh-review/git-push` | push (`dir?`, `confirm: true`, `remote?`, `branch?`) |
+| `/api/dsh-review/branch-info` | ветка, ahead/behind, base, коммиты, GitHub-remote (`dir`) |
+| `/api/dsh-review/pr-create` | создание PR (`dir?`, `title`, `body?`, `base?`, `head?`, `confirm: true`) |
 
 ## Безопасность
 
 - Проверяются только файлы **внутри каталога проекта**: путь вида `../secret.txt` отклоняется.
 - Каталог тестов обязан лежать внутри корня воркспейса, а git-репозиторий —
   совпадать с выбранным каталогом (проверяется по реальному пути).
-- Откат, коммит и push требуют явного подтверждения (`confirm: true`).
+- Откат, коммит, push и создание PR требуют явного подтверждения (`confirm: true`).
+- Токен GitHub читается из credential store (`GITHUB_TOKEN`), в файлы и ответы
+  не пишется; сетевые запросы идут только на `https://api.github.com`.
 - Из внешних команд используются `git` и команда тестов; аргументы git
   фиксированы, имя файла или ветки не может подставить чужую опцию.
 - Параметр `command` у `tests_run` — произвольная команда оболочки: он нужен
@@ -111,11 +137,13 @@ pytest, dotnet, maven).
   изменений в основной карточке по-прежнему строится для корня воркспейса.
 - Установленные копии `plugins/*` в список «Каталог» не попадают: коммитить их
   нельзя, у них нет собственного репозитория.
+- PR создаётся только для GitHub-remote `origin`; ветку нужно заранее запушить,
+  иначе GitHub вернёт 422 с понятным текстом.
 
 ## Проверка
 
 ```powershell
-node --test test/changes.test.mjs test/tests.test.mjs test/projects.test.mjs test/git.test.mjs test/registration.test.mjs
+node --test test/changes.test.mjs test/tests.test.mjs test/projects.test.mjs test/git.test.mjs test/github.test.mjs test/registration.test.mjs
 ```
 
 Покрыто: разбор git-выводов, разметка diff, защита путей, откат в настоящем
@@ -124,4 +152,6 @@ node --test test/changes.test.mjs test/tests.test.mjs test/projects.test.mjs tes
 каталога и отказ для подкаталогов чужого репозитория, подсчёт файлов до `git add`
 (включая большие неотслеживаемые каталоги и `.gitignore`), показ `fatal:` из
 git-ошибок, таймауты git-операций, отказ при секретах и опасных путях, коммит и
-push в локальный bare-remote, регистрация инструментов и маршрутов.
+push в локальный bare-remote, разбор remote, ветку/ahead/behind и base,
+создание PR с mock fetch (существующий PR, 422, нет токена, confirm),
+регистрация инструментов и маршрутов.

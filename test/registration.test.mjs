@@ -22,6 +22,9 @@ function fakeContext(options = {}) {
     get: (name) => (name === 'workspaceRegistry' && options.projectDir !== undefined
       ? { list: () => [{ path: options.projectDir }] }
       : undefined),
+    credentials: {
+      resolve: async () => (options.token === undefined ? { value: '' } : { value: options.token }),
+    },
     toolsList: tools,
     routesList: routes,
   }
@@ -45,7 +48,7 @@ test('index.js регистрирует инструменты и POST-марш�
   module.apply(ctx)
 
   const toolNames = ctx.toolsList.map(tool => tool.name).sort()
-  assert.deepEqual(toolNames, ['changes_review', 'git_commit', 'git_push', 'tests_run'])
+  assert.deepEqual(toolNames, ['branch_info', 'changes_review', 'git_commit', 'git_push', 'pr_create', 'tests_run'])
 
   for (const tool of ctx.toolsList) {
     assert.equal(typeof tool.description, 'string', `${tool.name}: описание`)
@@ -67,14 +70,21 @@ test('index.js регистрирует инструменты и POST-марш�
   assert.equal('required' in tests.parameters, false)
   assert.ok(tests.parameters.properties.dir, 'tests_run: параметр dir')
   assert.ok(tests.parameters.properties.command, 'tests_run: параметр command')
+  const branch = ctx.toolsList.find(tool => tool.name === 'branch_info')
+  assert.ok(branch.parameters.properties.dir, 'branch_info: параметр dir')
+  const pr = ctx.toolsList.find(tool => tool.name === 'pr_create')
+  assert.deepEqual(pr.parameters.required, ['title', 'confirm'])
+  assert.ok(pr.parameters.properties.dir, 'pr_create: параметр dir')
 
   const routes = ctx.routesList.map(route => route.path).sort()
   assert.deepEqual(routes, [
+    '/api/dsh-review/branch-info',
     '/api/dsh-review/diff',
     '/api/dsh-review/git-commit',
     '/api/dsh-review/git-push',
     '/api/dsh-review/git-status',
     '/api/dsh-review/init',
+    '/api/dsh-review/pr-create',
     '/api/dsh-review/projects',
     '/api/dsh-review/revert',
     '/api/dsh-review/state',
@@ -193,8 +203,7 @@ test('маршрут tests-run без dir при нескольких канди
   }
 })
 
-test('маршрут git-status возвращает репозиторий и файлы выбранного каталога', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'review-route-git-status-'))
+test('маршрут git-status возвращает репозиторий и файлы выбранного каталога', async () => {  const dir = await mkdtemp(join(tmpdir(), 'review-route-git-status-'))
   try {
     await run('git', ['init', '-q', '-b', 'main'], { cwd: dir })
     await run('git', ['config', 'user.name', 'test'], { cwd: dir })
@@ -242,6 +251,53 @@ test('маршрут git-commit делает коммит после confirm:tru
     const push = await callRoute(ctx, '/api/dsh-review/git-push', { confirm: false })
     assert.equal(push.ok, false)
     assert.match(push.message, /подтвержд/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('маршрут branch-info возвращает ветку выбранного каталога', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'review-route-branch-'))
+  try {
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: dir })
+    await run('git', ['config', 'user.name', 'test'], { cwd: dir })
+    await run('git', ['config', 'user.email', 'test@example.com'], { cwd: dir })
+    await writeFile(join(dir, 'app.js'), 'const value = 1\n', 'utf8')
+    await run('git', ['add', '.'], { cwd: dir })
+    await run('git', ['commit', '-q', '-m', 'init'], { cwd: dir })
+    await run('git', ['remote', 'add', 'origin', 'https://github.com/acme/app.git'], { cwd: dir })
+
+    const module = await import('../index.js')
+    const ctx = fakeContext({ projectDir: dir })
+    module.apply(ctx)
+    const payload = await callRoute(ctx, '/api/dsh-review/branch-info', { dir: '.' })
+    assert.equal(payload.ok, true)
+    assert.equal(payload.branch, 'main')
+    assert.equal(payload.baseBranch, 'main')
+    assert.equal(payload.github.owner, 'acme')
+    assert.equal(payload.github.repo, 'app')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('маршрут pr-create без confirm и без токена отвечает понятной ошибкой', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'review-route-pr-'))
+  try {
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: dir })
+    await run('git', ['config', 'user.name', 'test'], { cwd: dir })
+    await run('git', ['config', 'user.email', 'test@example.com'], { cwd: dir })
+    await writeFile(join(dir, 'app.js'), 'const value = 1\n', 'utf8')
+    await run('git', ['add', '.'], { cwd: dir })
+    await run('git', ['commit', '-q', '-m', 'init'], { cwd: dir })
+    await run('git', ['remote', 'add', 'origin', 'https://github.com/acme/app.git'], { cwd: dir })
+
+    const module = await import('../index.js')
+    const ctx = fakeContext({ projectDir: dir })
+    module.apply(ctx)
+    const noConfirm = await callRoute(ctx, '/api/dsh-review/pr-create', { dir: '.', title: 'x' })
+    assert.equal(noConfirm.ok, false)
+    assert.match(noConfirm.message, /подтвержд/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

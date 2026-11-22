@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Changes review",
-    "description": "Per-directory review: tests and commit/push only in the selected directory's own git repository — with file counting, timeouts and readable git errors, without leaving DSH.",
+    "description": "Selected directory: tests, commit/push, branch and ahead/behind, GitHub pull request creation — with confirmations, timeouts and readable errors, without leaving DSH.",
     "detail": "docs/DETAIL.md"
   }
 }

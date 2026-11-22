@@ -23,6 +23,8 @@ window.__ModuleLoader__.load({
     const GIT_STATUS_PATH = '/api/dsh-review/git-status'
     const COMMIT_PATH = '/api/dsh-review/git-commit'
     const PUSH_PATH = '/api/dsh-review/git-push'
+    const BRANCH_INFO_PATH = '/api/dsh-review/branch-info'
+    const PR_CREATE_PATH = '/api/dsh-review/pr-create'
 
     const en = {
       title: 'Changes review',
@@ -85,6 +87,21 @@ window.__ModuleLoader__.load({
       requestTimeout: 'Request timeout',
       hashLabel: 'hash',
       choosePublishHint: 'Choose a directory with its own repository, e.g. .publish/<name>.',
+      createPr: 'Create PR',
+      prPanelTitle: 'Create pull request',
+      prTitle: 'Title',
+      prBody: 'Description',
+      prBase: 'Base branch',
+      prHead: 'Head branch',
+      prCreated: 'PR created',
+      prExisting: 'PR already exists',
+      prNeedTitle: 'Enter a PR title.',
+      prBaseHeadSame: 'Head and base are the same — switch to a feature branch.',
+      prNoGithub: 'origin is not GitHub — PR is unavailable.',
+      prMainWarning: 'You are on the base branch: switch to a feature branch before creating a PR.',
+      branchInfoFailed: 'Could not read branch info',
+      branchDetached: 'detached HEAD',
+      branchLinePrefix: 'Branch',
     }
     const ru = {
       title: 'Ревью изменений',
@@ -147,6 +164,21 @@ window.__ModuleLoader__.load({
       requestTimeout: 'Таймаут запроса',
       hashLabel: 'hash',
       choosePublishHint: 'Выберите каталог с собственным репозиторием, например .publish/<имя>.',
+      createPr: 'Создать PR',
+      prPanelTitle: 'Создание pull request',
+      prTitle: 'Название',
+      prBody: 'Описание',
+      prBase: 'Базовая ветка',
+      prHead: 'Ветка PR',
+      prCreated: 'PR создан',
+      prExisting: 'PR уже существует',
+      prNeedTitle: 'Введите название PR.',
+      prBaseHeadSame: 'Ветка PR совпадает с базовой — переключитесь на отдельную ветку.',
+      prNoGithub: 'origin не GitHub — создать PR нельзя.',
+      prMainWarning: 'Вы на базовой ветке: перед PR переключитесь на отдельную ветку.',
+      branchInfoFailed: 'Не удалось получить данные о ветке',
+      branchDetached: 'HEAD оторван',
+      branchLinePrefix: 'Ветка',
     }
 
     const KIND_LABEL = {
@@ -372,6 +404,9 @@ function ChangesCard() {
       const [selectedDir, setSelectedDir] = React.useState('')
       const [projectsReady, setProjectsReady] = React.useState(false)
       const [projectsError, setProjectsError] = React.useState('')
+      const [branchInfo, setBranchInfo] = React.useState(null)
+      const [branchError, setBranchError] = React.useState('')
+      const [prPending, setPrPending] = React.useState(null)
 
       const load = React.useCallback(async () => {
         setLoading(true)
@@ -408,6 +443,28 @@ function ChangesCard() {
       React.useEffect(() => {
         void loadProjects()
       }, [loadProjects])
+
+      // Ветка выбранного каталога: ahead/behind и данные для PR.
+      const loadBranchInfo = React.useCallback(async () => {
+        const dir = selectedDir !== '' ? selectedDir : '.'
+        try {
+          const data = await post(BRANCH_INFO_PATH, { dir }, 60000)
+          if (data?.ok === true) {
+            setBranchInfo(data)
+            setBranchError('')
+          } else {
+            setBranchInfo(null)
+            setBranchError(String(data?.message ?? t('branchInfoFailed')))
+          }
+        } catch (cause) {
+          setBranchInfo(null)
+          setBranchError(String(cause?.message ?? cause))
+        }
+      }, [selectedDir])
+
+      React.useEffect(() => {
+        void loadBranchInfo()
+      }, [loadBranchInfo])
 
       React.useEffect(() => {
         if (!open) return
@@ -526,6 +583,7 @@ function ChangesCard() {
         setAction('prepare')
         setActionResult(null)
         setNotice('')
+        setPrPending(null)
         try {
           const dir = selectedDir !== '' ? selectedDir : '.'
           const status = await post(GIT_STATUS_PATH, { dir })
@@ -625,6 +683,7 @@ function ChangesCard() {
           })
           setPending(null)
           await load()
+          await loadBranchInfo()
         } catch (cause) {
           const details = []
           if (pending.repoPath !== '' || pending.repo !== '') {
@@ -638,6 +697,94 @@ function ChangesCard() {
             truncated: false,
           })
           await load()
+        } finally {
+          setAction('')
+        }
+      }
+
+      // «Создать PR»: свежие данные ветки, затем панель подтверждения.
+      const beginPrCreate = async () => {
+        if (action !== '') return
+        setAction('preparePr')
+        setActionResult(null)
+        setNotice('')
+        setPending(null)
+        try {
+          const dir = selectedDir !== '' ? selectedDir : '.'
+          const data = await post(BRANCH_INFO_PATH, { dir }, 60000)
+          if (data?.ok !== true) {
+            setActionResult({
+              ok: false,
+              title: String(data?.message ?? t('branchInfoFailed')),
+              details: [`${t('projectDirResult')}: ${dirLabel(dir)}`],
+              output: '',
+              truncated: false,
+            })
+            return
+          }
+          setBranchInfo(data)
+          const branch = typeof data.branch === 'string' ? data.branch : ''
+          const base = typeof data.baseBranch === 'string' ? data.baseBranch : 'main'
+          setPrPending({
+            dir,
+            branch,
+            base,
+            head: branch,
+            title: branch.replace(/_/g, ' '),
+            body: Array.isArray(data.commits) ? data.commits.join('\n') : '',
+            github: data.github ?? null,
+          })
+        } catch (cause) {
+          setActionResult({ ok: false, title: String(cause?.message ?? cause), details: [], output: '', truncated: false })
+        } finally {
+          setAction('')
+        }
+      }
+
+      // Подтверждение: создаём PR через GitHub API (маршрут берёт токен из credential store).
+      const submitPr = async () => {
+        if (prPending === null || action !== '') return
+        const title = prPending.title.trim()
+        if (title === '') {
+          setNotice(t('prNeedTitle'))
+          return
+        }
+        setAction('pr')
+        setNotice('')
+        setActionResult(null)
+        try {
+          const result = await post(PR_CREATE_PATH, {
+            dir: prPending.dir,
+            title,
+            body: prPending.body,
+            base: prPending.base,
+            head: prPending.head,
+            confirm: true,
+          }, 60000)
+          if (result?.ok !== true) {
+            setActionResult({
+              ok: false,
+              title: String(result?.message ?? t('branchInfoFailed')),
+              details: [`${prPending.head || '—'} → ${prPending.base || '—'}`],
+              output: '',
+              truncated: false,
+            })
+            return
+          }
+          setActionResult({
+            ok: true,
+            title: `${result.existing === true ? t('prExisting') : t('prCreated')} #${result.number ?? '—'}`,
+            details: [
+              `${result.repo ?? '—'}: ${result.head ?? '—'} → ${result.base ?? '—'}`,
+              ...(typeof result.url === 'string' && result.url !== '' ? [result.url] : []),
+            ],
+            output: '',
+            truncated: false,
+          })
+          setPrPending(null)
+          await loadBranchInfo()
+        } catch (cause) {
+          setActionResult({ ok: false, title: String(cause?.message ?? cause), details: [], output: '', truncated: false })
         } finally {
           setAction('')
         }
@@ -711,7 +858,86 @@ function ChangesCard() {
           { style: actionButtonStyle, disabled: busy, onClick: () => void beginCommitAndPush() },
           action === 'prepare' ? t('working') : t('commitPush'),
         ),
+        h(
+          'button',
+          { style: actionButtonStyle, disabled: busy, onClick: () => void beginPrCreate() },
+          action === 'preparePr' ? t('working') : t('createPr'),
+        ),
       )
+
+      const branchLine = branchInfo?.ok === true
+        ? h(
+            'span',
+            { style: { fontSize: 12, opacity: 0.82 } },
+            `${t('branchLinePrefix')}: ${branchInfo.branch ?? '—'} · ${Number.isFinite(branchInfo.ahead) ? branchInfo.ahead : '—'}↑/${Number.isFinite(branchInfo.behind) ? branchInfo.behind : '—'}↓`,
+          )
+        : branchError !== ''
+          ? h('span', { style: { fontSize: 12, color: '#d1242f' } }, branchError)
+          : null
+
+      const prPanelBlock = prPending === null
+        ? null
+        : h(
+            'div',
+            { style: S.panel },
+            h(
+              'span',
+              { style: { fontSize: 12.5, fontWeight: 600 } },
+              `${t('prPanelTitle')}: ${prPending.head || '—'} → ${prPending.base || '—'}`,
+            ),
+            prPending.github === null
+              ? h('span', { style: { fontSize: 12, color: '#d1242f' } }, t('prNoGithub'))
+              : null,
+            prPending.head !== '' && prPending.head === prPending.base
+              ? h('span', { style: { fontSize: 12, color: '#d1242f' } }, t('prMainWarning'))
+              : null,
+            h('input', {
+              style: S.input,
+              value: prPending.title,
+              placeholder: t('prTitle'),
+              onChange: (event) => setPrPending({ ...prPending, title: event.target.value }),
+            }),
+            h('textarea', {
+              style: { ...S.input, minHeight: 84, resize: 'vertical', fontFamily: 'inherit' },
+              value: prPending.body,
+              placeholder: t('prBody'),
+              onChange: (event) => setPrPending({ ...prPending, body: event.target.value }),
+            }),
+            h(
+              'div',
+              { style: S.row },
+              h(
+                'label',
+                { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 } },
+                h('span', { style: { opacity: 0.72 } }, t('prBase')),
+                h('input', {
+                  style: { ...S.input, flex: '0 1 160px', minWidth: 120 },
+                  value: prPending.base,
+                  onChange: (event) => setPrPending({ ...prPending, base: event.target.value }),
+                }),
+              ),
+              h(
+                'label',
+                { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 } },
+                h('span', { style: { opacity: 0.72 } }, t('prHead')),
+                h('input', {
+                  style: { ...S.input, flex: '0 1 160px', minWidth: 120 },
+                  value: prPending.head,
+                  onChange: (event) => setPrPending({ ...prPending, head: event.target.value }),
+                }),
+              ),
+            ),
+            h(
+              'div',
+              { style: S.row },
+              h(
+                'button',
+                { style: { ...S.button, opacity: busy ? 0.55 : 1 }, disabled: busy, onClick: () => void submitPr() },
+                action === 'pr' ? t('working') : t('confirm'),
+              ),
+              h('button', { style: S.button, disabled: busy, onClick: () => setPrPending(null) }, t('cancel')),
+            ),
+          )
 
       const pendingBlock = pending === null
         ? null
@@ -787,7 +1013,7 @@ function ChangesCard() {
         h(
           'div',
           { style: S.row },
-          h('button', { style: S.button, onClick: () => { void load(); void loadProjects() } }, loading ? t('loading') : t('refresh')),
+          h('button', { style: S.button, onClick: () => { void load(); void loadProjects(); void loadBranchInfo() } }, loading ? t('loading') : t('refresh')),
           state !== null
             ? h(
                 'span',
@@ -797,8 +1023,10 @@ function ChangesCard() {
             : null,
         ),
         actionsRow,
+        branchLine,
         projectsHint,
         projectsErrorLine,
+        prPanelBlock,
         pendingBlock,
         resultBlock,
         noticeLine,

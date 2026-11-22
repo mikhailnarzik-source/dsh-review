@@ -2,15 +2,17 @@
  * Host-часть `dsh-review`.
  *
  * Даёт агенту инструменты и интерфейсу маршруты для просмотра незакоммиченных
- * изменений проекта, запуска тестов, коммита и push. Внешние команды — только
- * `git` и команда тестов проекта; сетевых запросов нет.
+ * изменений проекта, запуска тестов, коммита/push, информации о ветке и
+ * создания PR. Внешние команды — `git` и команда тестов проекта; сеть — только
+ * GitHub API для PR.
  */
 import { readChanges, readDiff, revertFile, initRepository } from './lib/changes.mjs'
 import { runTests, detectProjects } from './lib/tests.mjs'
 import { commitChanges, pushChanges, gitStatus } from './lib/git.mjs'
+import { branchInfo, createPullRequest } from './lib/github.mjs'
 
 export const name = 'dsh-review'
-export const inject = ['tools', 'sessionPersistence', 'connection', 'workspaceRegistry']
+export const inject = ['tools', 'sessionPersistence', 'connection', 'workspaceRegistry', 'credentials']
 
 const STATE_PATH = '/api/dsh-review/state'
 const DIFF_PATH = '/api/dsh-review/diff'
@@ -21,6 +23,8 @@ const TESTS_PATH = '/api/dsh-review/tests-run'
 const GIT_STATUS_PATH = '/api/dsh-review/git-status'
 const COMMIT_PATH = '/api/dsh-review/git-commit'
 const PUSH_PATH = '/api/dsh-review/git-push'
+const BRANCH_INFO_PATH = '/api/dsh-review/branch-info'
+const PR_CREATE_PATH = '/api/dsh-review/pr-create'
 
 /** Как состояние git превращается в подпись для человека. */
 const KIND_RU = {
@@ -50,6 +54,16 @@ async function projectDir(ctx) {
     // реестр недоступен — работаем от текущего каталога
   }
   return process.cwd()
+}
+
+/** Токен GitHub из credential store; пустая строка, если не сохранён. */
+async function resolveGitHubToken(ctx) {
+  try {
+    const hit = await ctx.credentials.resolve('GITHUB_TOKEN')
+    return typeof hit?.value === 'string' ? hit.value : ''
+  } catch {
+    return ''
+  }
 }
 
 function json(payload, status = 200) {
@@ -158,6 +172,35 @@ function formatPush(result) {
   ]
   if (typeof result?.output === 'string' && result.output !== '') lines.push(result.output)
   return clipText(lines.join('\n'))
+}
+
+/** Текст для инструмента `branch_info`. */
+function formatBranchInfo(result) {
+  if (result?.ok !== true) return `НЕТ ДАННЫХ О ВЕТКЕ: ${result?.message ?? 'причина неизвестна'}`
+  const ahead = Number.isFinite(result?.ahead) ? result.ahead : '—'
+  const behind = Number.isFinite(result?.behind) ? result.behind : '—'
+  const lines = [
+    `ВЕТКА: ${result?.branch ?? '—'} (${result?.repo ?? '—'}); ahead: ${ahead}, behind: ${behind}`,
+    `base: ${result?.baseBranch ?? '—'}; upstream: ${result?.upstream ?? '—'}`,
+    `remote: ${result?.remoteUrl ?? '—'}${result?.github ? ` (GitHub: ${result.github.owner}/${result.github.repo})` : ' (не GitHub)'}`,
+  ]
+  if (Array.isArray(result?.commits) && result.commits.length > 0) {
+    lines.push('коммиты для PR:')
+    lines.push(...result.commits.map(line => `- ${line}`))
+  }
+  if (Array.isArray(result?.warnings) && result.warnings.length > 0) lines.push(`предупреждения: ${result.warnings.join('; ')}`)
+  return clipText(lines.join('\n'))
+}
+
+/** Текст для инструмента `pr_create`. */
+function formatPullRequest(result) {
+  const status = result?.existing === true ? 'PR УЖЕ СУЩЕСТВУЕТ' : 'PR СОЗДАН'
+  const lines = [
+    `${status}: #${result?.number ?? '—'} ${result?.title ?? ''}`.trim(),
+    `${result?.repo ?? '—'}: ${result?.head ?? '—'} → ${result?.base ?? '—'}`,
+    String(result?.url ?? ''),
+  ]
+  return clipText(lines.filter(line => line !== '').join('\n'))
 }
 
 /** Упасть, если операция вернула ok:false, иначе отформатировать результат. */
@@ -287,6 +330,48 @@ export function apply(ctx) {
             const body = await readBody(request)
             const root = await projectDir(ctx)
             const result = await gitStatus({ rootDir: root, dir: body.dir })
+            return json(result)
+          } catch (error) {
+            return json({ ok: false, message: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      })
+
+      ctx.connection.fetch.register({
+        path: BRANCH_INFO_PATH,
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: async (request) => {
+          try {
+            const body = await readBody(request)
+            const root = await projectDir(ctx)
+            const result = await branchInfo({ rootDir: root, dir: body.dir })
+            return json(result)
+          } catch (error) {
+            return json({ ok: false, message: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      })
+
+      ctx.connection.fetch.register({
+        path: PR_CREATE_PATH,
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: async (request) => {
+          try {
+            const body = await readBody(request)
+            const root = await projectDir(ctx)
+            const token = await resolveGitHubToken(ctx)
+            const result = await createPullRequest({
+              rootDir: root,
+              dir: body.dir,
+              title: body.title,
+              body: body.body,
+              base: body.base,
+              head: body.head,
+              confirm: body.confirm,
+              token,
+            })
             return json(result)
           } catch (error) {
             return json({ ok: false, message: error instanceof Error ? error.message : String(error) })
@@ -473,5 +558,69 @@ export function apply(ctx) {
     })
   } catch (error) {
     console.error('[dsh-review] инструмент git_push недоступен:', error)
+  }
+
+  try {
+    ctx.tools.register({
+      name: 'branch_info',
+      description: 'Показать ветку выбранного каталога: branch, remote origin, ahead/behind, base-ветку, коммиты для PR и доступность GitHub.',
+      parameters: {
+        type: 'object',
+        properties: {
+          dir: {
+            type: 'string',
+            description: 'Каталог проекта относительно корня воркспейса, например ".publish/dsh-review"; "." — корень.',
+          },
+        },
+      },
+      output: TEXT_OUTPUT,
+      async execute(input) {
+        const root = await projectDir(ctx)
+        const result = await branchInfo({ rootDir: root, dir: input?.dir })
+        return formatBranchInfo(result)
+      },
+    })
+  } catch (error) {
+    console.error('[dsh-review] инструмент branch_info недоступен:', error)
+  }
+
+  try {
+    ctx.tools.register({
+      name: 'pr_create',
+      description: 'Создать pull request на GitHub для выбранного каталога (или вернуть уже существующий). Требует confirm: true и сохранённый GITHUB_TOKEN; title обязателен, body/base/head по умолчанию берутся из ветки.',
+      parameters: {
+        type: 'object',
+        properties: {
+          dir: {
+            type: 'string',
+            description: 'Каталог проекта относительно корня воркспейса, например ".publish/dsh-review"; "." — корень.',
+          },
+          title: { type: 'string', description: 'Название PR.' },
+          body: { type: 'string', description: 'Описание PR; по умолчанию — список коммитов base..HEAD.' },
+          base: { type: 'string', description: 'Базовая ветка; по умолчанию origin/HEAD или main.' },
+          head: { type: 'string', description: 'Ветка PR; по умолчанию текущая ветка.' },
+          confirm: { type: 'boolean', description: 'Обязательно true: подтверждение создания PR.' },
+        },
+        required: ['title', 'confirm'],
+      },
+      output: TEXT_OUTPUT,
+      async execute(input) {
+        const root = await projectDir(ctx)
+        const token = await resolveGitHubToken(ctx)
+        const result = await createPullRequest({
+          rootDir: root,
+          dir: input?.dir,
+          title: input?.title,
+          body: input?.body,
+          base: input?.base,
+          head: input?.head,
+          confirm: input?.confirm,
+          token,
+        })
+        return assertOk(result, formatPullRequest)
+      },
+    })
+  } catch (error) {
+    console.error('[dsh-review] инструмент pr_create недоступен:', error)
   }
 }

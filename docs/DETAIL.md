@@ -11,9 +11,10 @@
 | Логика ревью | `lib/changes.mjs` | `git status --porcelain -z`, `git diff --numstat HEAD`, diff файла, откат |
 | Тесты | `lib/tests.mjs` | поиск каталогов с тестами, автодетект команды, spawn с таймаутом, обрезка и разбор вывода |
 | Запись git | `lib/git.mjs` | repo-скоуп выбранного каталога, статус, коммит с проверками и таймаутами, push без force |
+| GitHub | `lib/github.mjs` | разбор remote, branch/ahead/behind/base, создание PR через `api.github.com` |
 | Пути | `lib/paths.mjs` | «внутри корня» по реальному пути — общее правило для тестов и git |
-| Host | `index.js` | девять POST-маршрутов и четыре инструмента |
-| Клиент | `client.js` | карточка: файлы, diff, откат, тесты, коммит и push |
+| Host | `index.js` | одиннадцать POST-маршрутов и шесть инструментов |
+| Клиент | `client.js` | карточка: файлы, diff, откат, тесты, коммит/push, ветка и PR |
 
 Модули `lib/*.mjs` не знают про DSH: на вход каталог проекта, на выходе
 структуры. Поэтому они проверяются тестами без запуска приложения.
@@ -94,6 +95,29 @@
   сбрасывается в `finally`, ошибки (включая `fatal:`) показываются в панели
   результата; для не-репозитория выводится подсказка про `.publish/<имя>`.
 
+### Ветки и PR
+
+- `branch_info`/`/api/dsh-review/branch-info` для выбранного каталога возвращает
+  `branch` (`rev-parse --abbrev-ref HEAD`), `remoteUrl`, `upstream`, `ahead` и
+  `behind` (`rev-list --left-right --count @{upstream}...HEAD`; без upstream —
+  `null` и предупреждение), `baseBranch` (`origin/HEAD`, затем `origin/main`,
+  `origin/master`, иначе `main`), последние до 20 коммитов `base..HEAD` и
+  `github` (`owner/repo`, только для github.com).
+- В секции показывается «Ветка: `<branch>` · `<ahead>`↑/`<behind>`↓».
+- «Создать PR» сначала запрашивает branch-info, затем открывает панель с полями
+  title (по умолчанию имя ветки, `_` → пробел), body (список коммитов), base и
+  head. Предупреждения: ветка совпадает с base, origin не GitHub.
+- `createPullRequest` требует `confirm: true`; берёт токен из credential store
+  (`GITHUB_TOKEN`), без него подсказывает «Настройки → Плагины → GitHub».
+  Сначала GET `/repos/{o}/{r}/pulls?head={owner}:{head}&state=open` — найденный
+  PR возвращается как `existing: true`; иначе POST `/repos/{o}/{r}/pulls`
+  `{title, body, head, base}`. Ошибки 401/403/404/422/429 переводятся на русский.
+- URL запроса собирается только от константы `https://api.github.com`; заголовки
+  `Authorization: Bearer`, `Accept: application/vnd.github+json`,
+  `X-GitHub-Api-Version: 2022-11-28`, `User-Agent: dsh-review`; таймаут 60 с.
+- Ответ интерфейса: «PR #N создан (или уже существует)» со ссылкой; ошибки — в
+  панели результата, состояние «Выполняется…» сбрасывается в `finally`.
+
 ### Что осталось за рамками
 
 - Разрешение конфликтов и выбор стороны слияния.
@@ -103,3 +127,5 @@
   изменений в основной карточке по-прежнему строится для корня воркспейса.
 - Установленные копии `plugins/*` намеренно не попадают в список каталогов:
   у них нет собственного репозитория, коммит ушёл бы в корень воркспейса.
+- PR создаётся только для GitHub-remote `origin`; ветка должна быть запушена,
+  иначе GitHub вернёт 422 (текст показывается как есть).
