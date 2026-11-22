@@ -18,6 +18,9 @@ window.__ModuleLoader__.load({
     const DIFF_PATH = '/api/dsh-review/diff'
     const REVERT_PATH = '/api/dsh-review/revert'
     const INIT_PATH = '/api/dsh-review/init'
+    const TESTS_PATH = '/api/dsh-review/tests-run'
+    const COMMIT_PATH = '/api/dsh-review/git-commit'
+    const PUSH_PATH = '/api/dsh-review/git-push'
 
     const en = {
       title: 'Changes review',
@@ -44,6 +47,30 @@ window.__ModuleLoader__.load({
       initGit: 'Create git repository',
       initConfirm: 'Create a repository and make the first commit?',
       initDone: 'Repository created',
+      runTests: 'Run tests',
+      commitPush: 'Commit and push',
+      working: 'Working…',
+      confirmCommitPush: 'Commit and push these changes?',
+      filesCount: 'files',
+      commitMessage: 'Commit message',
+      confirm: 'Confirm',
+      cancel: 'Cancel',
+      messageRequired: 'Enter a commit message.',
+      noChanges: 'Nothing to commit.',
+      testsPassed: 'Tests passed',
+      testsFailed: 'Tests failed',
+      testsTimeout: 'Tests timed out',
+      commitCreated: 'Commit',
+      commitFailed: 'Commit failed',
+      pushed: 'Pushed',
+      pushFailed: 'Push failed',
+      remoteLabel: 'remote',
+      branchLabel: 'branch',
+      codeLabel: 'code',
+      durationLabel: 'duration',
+      outputTruncated: 'Output truncated: head and tail shown.',
+      ms: 'ms',
+      sec: 's',
     }
     const ru = {
       title: 'Ревью изменений',
@@ -70,6 +97,30 @@ window.__ModuleLoader__.load({
       initGit: 'Создать репозиторий git',
       initConfirm: 'Создать репозиторий и сделать первый коммит?',
       initDone: 'Репозиторий создан',
+      runTests: 'Прогнать тесты',
+      commitPush: 'Закоммитить и запушить',
+      working: 'Выполняется…',
+      confirmCommitPush: 'Закоммитить и запушить эти изменения?',
+      filesCount: 'файлов',
+      commitMessage: 'Сообщение коммита',
+      confirm: 'Подтвердить',
+      cancel: 'Отмена',
+      messageRequired: 'Введите сообщение коммита.',
+      noChanges: 'Нет изменений для коммита.',
+      testsPassed: 'Тесты прошли',
+      testsFailed: 'Тесты упали',
+      testsTimeout: 'Тесты не уложились в таймаут',
+      commitCreated: 'Коммит',
+      commitFailed: 'Коммит не создан',
+      pushed: 'Push выполнен',
+      pushFailed: 'Push не выполнен',
+      remoteLabel: 'remote',
+      branchLabel: 'ветка',
+      codeLabel: 'код',
+      durationLabel: 'длительность',
+      outputTruncated: 'Вывод обрезан: показаны начало и хвост.',
+      ms: 'мс',
+      sec: 'с',
     }
 
     const KIND_LABEL = {
@@ -116,6 +167,38 @@ window.__ModuleLoader__.load({
         fontSize: 12,
         fontWeight: 600,
         cursor: 'pointer',
+      },
+      panel: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        padding: '8px 10px',
+        borderRadius: 8,
+        border: '1px solid rgba(128,128,128,0.28)',
+        background: 'rgba(128,128,128,0.06)',
+      },
+      input: {
+        flex: '1 1 260px',
+        minWidth: 200,
+        padding: '6px 8px',
+        borderRadius: 8,
+        border: '1px solid rgba(128,128,128,0.35)',
+        background: 'transparent',
+        color: 'inherit',
+        font: 'inherit',
+        fontSize: 12.5,
+      },
+      muted: { fontSize: 12, opacity: 0.72 },
+      fileName: {
+        margin: 0,
+        padding: '6px 8px',
+        borderRadius: 8,
+        background: 'rgba(128,128,128,0.08)',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontSize: 11.5,
+        lineHeight: 1.4,
+        maxHeight: 132,
+        overflow: 'auto',
       },
       diff: {
         margin: 0,
@@ -226,6 +309,9 @@ function ChangesCard() {
       const [diff, setDiff] = React.useState([])
       const [confirm, setConfirm] = React.useState('')
       const [notice, setNotice] = React.useState('')
+      const [action, setAction] = React.useState('')
+      const [actionResult, setActionResult] = React.useState(null)
+      const [pending, setPending] = React.useState(null)
 
       const load = React.useCallback(async () => {
         setLoading(true)
@@ -276,6 +362,122 @@ function ChangesCard() {
         }
       }
 
+      const formatDuration = (durationMs) => {
+        const ms = Number(durationMs)
+        if (!Number.isFinite(ms) || ms < 0) return '—'
+        if (ms < 1000) return `${Math.round(ms)} ${t('ms')}`
+        return `${(ms / 1000).toFixed(1)} ${t('sec')}`
+      }
+
+      // «Прогнать тесты»: маршрут сам определяет команду и обрезает вывод.
+      const runTestsAction = async () => {
+        if (action !== '') return
+        setAction('tests')
+        setActionResult(null)
+        setNotice('')
+        try {
+          const data = await post(TESTS_PATH, {})
+          const ok = data?.ok === true
+          const title = ok
+            ? t('testsPassed')
+            : data?.timedOut === true
+              ? t('testsTimeout')
+              : t('testsFailed')
+          const counts = data?.passed !== null || data?.failed !== null
+            ? `passed: ${data?.passed ?? '—'}, failed: ${data?.failed ?? '—'}`
+            : ''
+          setActionResult({
+            ok,
+            title,
+            details: [
+              `${data?.command ?? '—'}`,
+              `${t('codeLabel')}: ${data?.exitCode ?? '—'}; ${t('durationLabel')}: ${formatDuration(data?.durationMs)}${counts !== '' ? `; ${counts}` : ''}`,
+            ],
+            output: typeof data?.output === 'string' ? data.output : '',
+            truncated: data?.truncated === true,
+          })
+        } catch (cause) {
+          setActionResult({ ok: false, title: String(cause?.message ?? cause), details: [], output: '', truncated: false })
+        } finally {
+          setAction('')
+        }
+      }
+
+      // Шаг 1 commit+push: свежий список файлов и обязательное подтверждение.
+      const beginCommitAndPush = async () => {
+        if (action !== '') return
+        setAction('prepare')
+        setActionResult(null)
+        setNotice('')
+        try {
+          const snapshot = await post(STATE_PATH, {})
+          if (snapshot?.ok !== true) {
+            setActionResult({ ok: false, title: String(snapshot?.message ?? t('failed')), details: [], output: '', truncated: false })
+            return
+          }
+          setState(snapshot)
+          const paths = (snapshot.files ?? []).map(file => file.path)
+          if (paths.length === 0) {
+            setNotice(t('noChanges'))
+            return
+          }
+          setPending({ files: paths, message: '' })
+        } catch (cause) {
+          setActionResult({ ok: false, title: String(cause?.message ?? cause), details: [], output: '', truncated: false })
+        } finally {
+          setAction('')
+        }
+      }
+
+      // Шаг 2: пользователь подтвердил список и ввёл сообщение — commit, затем push.
+      const submitCommitAndPush = async () => {
+        if (pending === null || action !== '') return
+        const message = pending.message.trim()
+        if (message === '') {
+          setNotice(t('messageRequired'))
+          return
+        }
+        setAction('commit')
+        setNotice('')
+        setActionResult(null)
+        try {
+          const commit = await post(COMMIT_PATH, { message, paths: 'all', confirm: true })
+          if (commit?.ok !== true) {
+            setActionResult({
+              ok: false,
+              title: String(commit?.message ?? t('commitFailed')),
+              details: Array.isArray(commit?.files) && commit.files.length > 0
+                ? [`${commit.files.length} ${t('filesCount')}: ${commit.files.slice(0, 10).join(', ')}`]
+                : [],
+              output: typeof commit?.output === 'string' ? commit.output : '',
+              truncated: false,
+            })
+            await load()
+            return
+          }
+          const push = await post(PUSH_PATH, { confirm: true })
+          const ok = push?.ok === true
+          setActionResult({
+            ok,
+            title: ok ? t('pushed') : `${t('commitCreated')} ✓ / ${t('pushFailed')}`,
+            details: [
+              `${t('commitCreated')}: ${commit?.commit ?? '—'}; ${t('filesCount')}: ${Array.isArray(commit?.files) ? commit.files.length : 0}`,
+              `${t('remoteLabel')}: ${push?.remote ?? '—'}; ${t('branchLabel')}: ${push?.branch ?? '—'}; ${t('codeLabel')}: ${push?.exitCode ?? '—'}`,
+              ...ok ? [] : [String(push?.message ?? '')],
+            ],
+            output: [commit?.output, push?.output].filter(part => typeof part === 'string' && part !== '').join('\n'),
+            truncated: false,
+          })
+          setPending(null)
+          await load()
+        } catch (cause) {
+          setActionResult({ ok: false, title: String(cause?.message ?? cause), details: [], output: '', truncated: false })
+          await load()
+        } finally {
+          setAction('')
+        }
+      }
+
       if (!open) {
         return h(
           'div',
@@ -298,6 +500,80 @@ function ChangesCard() {
       }
 
       const files = state?.files ?? []
+
+      const busy = action !== ''
+      const actionButtonStyle = { ...S.button, opacity: busy ? 0.55 : 1, cursor: busy ? 'default' : 'pointer' }
+      const actionsRow = h(
+        'div',
+        { style: S.row },
+        h(
+          'button',
+          { style: actionButtonStyle, disabled: busy, onClick: () => void runTestsAction() },
+          action === 'tests' ? t('working') : t('runTests'),
+        ),
+        h(
+          'button',
+          { style: actionButtonStyle, disabled: busy, onClick: () => void beginCommitAndPush() },
+          action === 'prepare' ? t('working') : t('commitPush'),
+        ),
+      )
+
+      const pendingBlock = pending === null
+        ? null
+        : h(
+            'div',
+            { style: S.panel },
+            h(
+              'span',
+              { style: { fontSize: 12.5, fontWeight: 600 } },
+              `${t('confirmCommitPush')} ${pending.files.length} ${t('filesCount')}`,
+            ),
+            h(
+              'pre',
+              { style: S.fileName },
+              pending.files.slice(0, 20).join('\n') + (pending.files.length > 20 ? `\n… +${pending.files.length - 20}` : ''),
+            ),
+            h('input', {
+              style: S.input,
+              value: pending.message,
+              placeholder: t('commitMessage'),
+              onChange: (event) => setPending({ ...pending, message: event.target.value }),
+              onKeyDown: (event) => {
+                if (event.key === 'Enter') void submitCommitAndPush()
+              },
+            }),
+            h(
+              'div',
+              { style: S.row },
+              h(
+                'button',
+                { style: { ...S.button, opacity: busy ? 0.55 : 1 }, disabled: busy, onClick: () => void submitCommitAndPush() },
+                action === 'commit' ? t('working') : t('confirm'),
+              ),
+              h(
+                'button',
+                { style: S.button, disabled: busy, onClick: () => setPending(null) },
+                t('cancel'),
+              ),
+            ),
+          )
+
+      const resultBlock = actionResult === null
+        ? null
+        : h(
+            'div',
+            { style: S.panel },
+            h(
+              'span',
+              { style: { fontSize: 12.5, fontWeight: 600, color: actionResult.ok ? '#2f9e44' : '#d1242f' } },
+              actionResult.title,
+            ),
+            ...(actionResult.details ?? []).map((line, index) => h('span', { key: `detail-${index}`, style: S.muted }, line)),
+            typeof actionResult.output === 'string' && actionResult.output !== ''
+              ? h('pre', { style: { ...S.diff, maxHeight: 240 } }, actionResult.output)
+              : null,
+            actionResult.truncated === true ? h('span', { style: S.muted }, t('outputTruncated')) : null,
+          )
 
       const noticeLine = notice !== '' ? h('span', { style: { fontSize: 12, opacity: 0.75 } }, notice) : null
 
@@ -322,6 +598,9 @@ function ChangesCard() {
               )
             : null,
         ),
+        actionsRow,
+        pendingBlock,
+        resultBlock,
         noticeLine,
         error !== ''
           ? h(

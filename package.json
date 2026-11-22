@@ -1,7 +1,7 @@
 {
   "name": "dsh-review",
-  "version": "1.0.12",
-  "description": "Обзор незакоммиченных изменений: список файлов, построчный diff и откат одного файла — без выхода из DSH",
+  "version": "1.1.0",
+  "description": "Обзор незакоммиченных изменений, запуск тестов, коммит и push — без выхода из DSH",
   "type": "module",
   "license": "MIT",
   "keywords": [
@@ -10,7 +10,10 @@
     "deepseek-harness",
     "git",
     "diff",
-    "review"
+    "review",
+    "tests",
+    "commit",
+    "push"
   ],
   "exports": {
     ".": "./index.js",
