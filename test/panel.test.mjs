@@ -194,8 +194,8 @@ test('main-панель: ключ plugin-review, шапка и настройк�
   assert.ok(tree.texts.includes('t:sectionProject'), 'нет секции «Проект»')
   assert.ok(tree.texts.includes('t:sectionChanges'), 'нет секции «Изменения»')
   assert.ok(
-    tree.nodes.some((node) => node.props?.className === 'dshrv-page-grid'),
-    'нет сетки настроек',
+    tree.nodes.some((node) => node.props?.className === 'dshrv-page-project'),
+    'нет колонки настроек «Проекта»',
   )
 
   // Никаких блоков страницы плагин-менеджера: описания и источника.

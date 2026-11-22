@@ -228,6 +228,20 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Тон чипа-статуса по виду файла: мягкая заливка по смыслу, как у кнопок.
+     * Новый и добавленный в индекс — успех, изменён — внимание, удалён/конфликт —
+     * ошибка, переименован — информация.
+     */
+    const KIND_TONE = {
+      staged: 'info',
+      untracked: 'success',
+      modified: 'warn',
+      deleted: 'error',
+      renamed: 'info',
+      conflict: 'error',
+    }
+
+    /**
      * Единая система кнопок плагина (спека `.tools/plugin-design-spec-v2.md`):
      * высота 36 px (маленькие в шапке — 32), padding 0 14, радиус 10,
      * шрифт 600 12.5, ширина — по тексту. Все варианты — только токены темы.
@@ -286,6 +300,64 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Чип-статус — «кнопка-близнец»: та же геометрия и шрифт, но не кликается.
+     * Высота 36 в секциях (32 в шапке и плотных строках), радиус 10,
+     * padding 0 12, рамка 1 px, шрифт 600 12.5, точка-индикатор 6 px слева.
+     * Заливки — мягкие токены темы: success/warn/error по смыслу, info — brand.
+     */
+    const CHIP_BASE = {
+      boxSizing: 'border-box',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      height: 32,
+      padding: '0 12px',
+      borderRadius: 10,
+      border: '1px solid var(--dsw-alias-border-l4)',
+      fontFamily: 'inherit',
+      fontSize: 12.5,
+      fontWeight: 600,
+      lineHeight: 1,
+      whiteSpace: 'nowrap',
+      maxWidth: '100%',
+      color: 'var(--dsw-alias-label-secondary)',
+      background: 'transparent',
+    }
+    const CHIP_SECTION = { height: 36 }
+    const CHIP_TONES = {
+      neutral: {
+        border: '1px solid var(--dsw-alias-border-l4)',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary)',
+        dot: 'var(--dsw-alias-label-tertiary)',
+      },
+      info: {
+        border: '1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 40%, transparent)',
+        background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)',
+        color: 'var(--dsw-alias-brand-primary)',
+        dot: 'var(--dsw-alias-brand-primary)',
+      },
+      success: {
+        border: '1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary) 45%, transparent)',
+        background: 'color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent)',
+        color: 'var(--dsw-alias-state-success-primary)',
+        dot: 'var(--dsw-alias-state-success-primary)',
+      },
+      warn: {
+        border: '1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 50%, transparent)',
+        background: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent)',
+        color: 'var(--dsw-alias-state-warn-primary)',
+        dot: 'var(--dsw-alias-state-warn-primary)',
+      },
+      error: {
+        border: '1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent)',
+        background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent)',
+        color: 'var(--dsw-alias-state-error-primary)',
+        dot: 'var(--dsw-alias-state-error-primary)',
+      },
+    }
+
+    /**
      * Страница плагина в едином стиле DSH: контент по центру (maxWidth 960),
      * шапка с иконкой и статусом, карточки-секции, адаптив в одну колонку.
      * Цвета — только токены темы; жёстких hex нет.
@@ -334,18 +406,8 @@ window.__ModuleLoader__.load({
         overflow: 'hidden',
       },
       headRight: { display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flex: '0 0 auto', flexWrap: 'wrap', minWidth: 0 },
-      chip: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '3px 9px',
-        borderRadius: 999,
-        fontSize: 12,
-        color: 'var(--dsw-alias-label-secondary)',
-        background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)',
-        whiteSpace: 'nowrap',
-      },
-      dot: { width: 7, height: 7, borderRadius: '50%', flex: '0 0 auto' },
+      chipDot: { width: 6, height: 6, borderRadius: '50%', flex: '0 0 auto' },
+      chipText: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       refresh: { ...BTN.secondary, height: 32 },
       iconButton: { ...BTN.icon },
       card: {
@@ -362,15 +424,22 @@ window.__ModuleLoader__.load({
       sectionHead: { display: 'flex', alignItems: 'center', gap: 8 },
       bar: { flex: '0 0 auto', width: 3, height: 14, borderRadius: 2, background: 'var(--dsw-alias-brand-primary)' },
       sectionTitle: { margin: 0, fontSize: 14, fontWeight: 600, lineHeight: 1.3, color: 'var(--dsw-alias-label-primary)' },
-      grid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))',
-        gap: 16,
-        alignItems: 'stretch',
+      /** Карточка «Проект» — одна колонка: поле каталога, чип ветки, кнопки. */
+      project: { display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 },
+      fieldBlock: { display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, width: '100%' },
+      fieldLabel: {
+        boxSizing: 'border-box',
         minWidth: 0,
+        fontSize: 12,
+        fontWeight: 600,
+        lineHeight: 1.4,
+        color: 'var(--dsw-alias-label-secondary)',
+        whiteSpace: 'nowrap',
+        overflowWrap: 'normal',
+        wordBreak: 'normal',
+        hyphens: 'auto',
       },
       row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 },
-      field: { display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 },
       hint: { fontSize: 12, lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' },
       muted: { fontSize: 12, lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' },
       primary: { ...BTN.primary },
@@ -405,6 +474,8 @@ window.__ModuleLoader__.load({
       select: {
         boxSizing: 'border-box',
         width: '100%',
+        maxWidth: '100%',
+        minWidth: 0,
         height: 34,
         padding: '0 8px',
         borderRadius: 9,
@@ -415,10 +486,12 @@ window.__ModuleLoader__.load({
         fontSize: 12.5,
       },
       file: {
+        boxSizing: 'border-box',
         display: 'flex',
         alignItems: 'center',
         gap: 8,
-        padding: '10px 12px',
+        minWidth: 0,
+        padding: '6px 10px',
         borderRadius: 10,
         border: '1px solid transparent',
         borderBottom: '1px solid var(--dsw-alias-border-l1)',
@@ -428,15 +501,6 @@ window.__ModuleLoader__.load({
       fileActive: {
         border: '1px solid var(--dsw-alias-brand-primary)',
         background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 6%, transparent)',
-      },
-      kind: {
-        flex: '0 0 auto',
-        padding: '1px 8px',
-        borderRadius: 999,
-        fontSize: 10.5,
-        lineHeight: '18px',
-        color: 'var(--dsw-alias-label-secondary)',
-        background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)',
       },
       fileName: {
         margin: 0,
@@ -491,8 +555,9 @@ window.__ModuleLoader__.load({
 
     /** CSS, который нельзя задать inline: наведение, фокус, disabled и адаптив. */
     const PAGE_CSS = [
-      // Сетка карточек: auto-fit, одна колонка на узком экране.
-      '.dshrv-page-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));align-items:stretch;}',
+      // Чипы-статусы — как кнопки: короткая подпись не рвётся, точка 6 px слева.
+      '.dshrv-page-chip{flex:0 0 auto;min-width:0;overflow-wrap:normal;word-break:normal;}',
+      '.dshrv-page-chip > .dshrv-page-chip-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
       // Кнопки — единая система: ширина по тексту, мягкие заливки из токенов.
       '.dshrv-page-primary,.dshrv-page-button,.dshrv-page-danger,.dshrv-page-refresh,.dshrv-page-icon{flex:0 0 auto;min-width:0;}',
       '.dshrv-page-primary:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-brand-primary) 28%,transparent) !important;}',
@@ -501,13 +566,21 @@ window.__ModuleLoader__.load({
       '.dshrv-page-primary:active:not(:disabled),.dshrv-page-button:active:not(:disabled),.dshrv-page-danger:active:not(:disabled){transform:translateY(1px);}',
       '.dshrv-page-field:focus-visible,.dshrv-page-primary:focus-visible,.dshrv-page-button:focus-visible,.dshrv-page-danger:focus-visible,.dshrv-page-refresh:focus-visible,.dshrv-page-icon:focus-visible{outline:2px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 55%,transparent);outline-offset:1px;}',
       '.dshrv-page-primary:disabled,.dshrv-page-button:disabled,.dshrv-page-danger:disabled,.dshrv-page-refresh:disabled{opacity:.55;cursor:default;}',
+      // Карточка «Проект»: одна колонка — подпись над полем, поле на всю ширину.
+      '.dshrv-page-project{display:flex;flex-direction:column;gap:12px;min-width:0;}',
+      '.dshrv-page-project .dshrv-page-project-field{display:flex;flex-direction:column;gap:6px;width:100%;min-width:0;}',
+      '.dshrv-page-project-label{white-space:nowrap;overflow-wrap:normal;word-break:normal;hyphens:auto;}',
+      '.dshrv-page-project .dshrv-page-field{width:100%;max-width:100%;min-width:0;}',
       '.dshrv-page-file{transition:background .14s ease;overflow-wrap:anywhere;}',
       '.dshrv-page-file:hover{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 5%,transparent);}',
-      // Адаптив: длинные строки переносятся, кнопки — в строку по тексту.
+      // Адаптив: страница не вылезает за экран, строки переносятся.
       '.dshrv-page{overflow-wrap:anywhere;}',
-      '.dshrv-page-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;margin-top:auto;}',
-      '@media (max-width: 900px){.dshrv-page{padding:20px 18px 36px !important;}.dshrv-page-grid{grid-template-columns:1fr !important;}}',
-      '@media (max-width: 640px){.dshrv-page{padding:16px 14px 28px !important;}.dshrv-page-head{gap:10px;}.dshrv-page-head-right{flex:1 1 100%;margin-left:0;}}',
+      '.dshrv-page-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;}',
+      '@media (max-width: 1024px){.dshrv-page{padding:22px 24px 38px !important;}.dshrv-page-head{gap:12px;}}',
+      '@media (max-width: 900px){.dshrv-page{padding:20px 18px 36px !important;}}',
+      '@media (max-width: 768px){.dshrv-page{padding:18px 16px 32px !important;}.dshrv-page-head{gap:10px;}.dshrv-page-actions{gap:8px;}}',
+      '@media (max-width: 640px){.dshrv-page{padding:16px 14px 28px !important;}.dshrv-page-head-right{flex:1 1 100%;margin-left:0;}.dshrv-page-actions .dshrv-page-button{flex:1 1 calc(50% - 4px);}}',
+      '@media (max-width: 480px){.dshrv-page{padding:14px 12px 24px !important;}.dshrv-page-actions .dshrv-page-button{flex:1 1 100%;}}',
     ].join('\n')
 
     let translate = (key) => key
@@ -542,6 +615,27 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * Чип-статус в единой системе с кнопками: та же высота, радиус, шрифт и
+     * рамка, мягкая заливка по смыслу и точка-индикатор 6 px слева.
+     * `section` включает высоту 36 (статус-блок внутри карточки-секции).
+     */
+    function StatusChip({ tone, label, section, title, live, style }) {
+      const name = typeof tone === 'string' && CHIP_TONES[tone] !== undefined ? tone : 'neutral'
+      const { dot, ...toneStyle } = CHIP_TONES[name]
+      return h(
+        'span',
+        {
+          className: `dshrv-page-chip dshrv-page-chip-${name}`,
+          style: { ...CHIP_BASE, ...(section === true ? CHIP_SECTION : null), ...toneStyle, ...(style ?? null) },
+          ...(title === undefined || title === '' ? {} : { title: String(title) }),
+          ...(live === true ? { role: 'status' } : {}),
+        },
+        h('span', { className: 'dshrv-page-chip-dot', style: { ...UI.chipDot, background: dot } }),
+        h('span', { className: 'dshrv-page-chip-text', style: UI.chipText }, label),
+      )
+    }
+
     /** Шапка страницы: квадрат с иконкой, заголовок, статус-чип и «Обновить». */
     function PageHeader({ icon, title, subtitle, chipLabel, chipTone, refreshLabel, onRefresh, open, onToggle }) {
       return h(
@@ -557,7 +651,7 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { className: 'dshrv-page-head-right', style: UI.headRight },
-          h('span', { style: UI.chip }, h('span', { style: { ...UI.dot, background: chipTone } }), chipLabel),
+          h(StatusChip, { tone: chipTone, label: chipLabel, live: true }),
           h(
             'button',
             { type: 'button', className: 'dshrv-page-refresh', style: UI.refresh, onClick: onRefresh },
@@ -1048,11 +1142,13 @@ window.__ModuleLoader__.load({
       const busy = action !== ''
       const noProjects = projectsReady && projects.length === 0 && projectsError === ''
       const canRunTests = !busy && !noProjects
+      // Строка «Каталог»: подпись отдельным блоком (не рвётся по слогам),
+      // поле — на всю ширину карточки; ниже чип ветки и кнопки в один ряд.
       const projectSelect = projects.length > 0
         ? h(
             'label',
-            { style: { display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } },
-            h('span', null, t('projectDirLabel')),
+            { className: 'dshrv-page-project-field', style: UI.fieldBlock },
+            h('span', { className: 'dshrv-page-project-label', style: UI.fieldLabel }, t('projectDirLabel')),
             h(
               'select',
               {
@@ -1072,7 +1168,14 @@ window.__ModuleLoader__.load({
         : null
       const projectsHint = noProjects ? h('span', { style: UI.hint }, t('noProjects')) : null
       const projectsErrorLine = projectsError !== ''
-        ? h('span', { style: { ...UI.hint, color: 'var(--dsw-alias-state-error-primary)' } }, projectsError)
+        ? h(StatusChip, {
+            key: 'projects-error',
+            section: true,
+            tone: 'error',
+            label: projectsError,
+            title: projectsError,
+            style: { alignSelf: 'flex-start' },
+          })
         : null
       const actionsRow = h(
         'div',
@@ -1110,13 +1213,22 @@ window.__ModuleLoader__.load({
       )
 
       const branchLine = branchInfo?.ok === true
-        ? h(
-            'span',
-            { style: UI.hint },
-            `${t('branchLinePrefix')}: ${branchInfo.branch ?? '—'} · ${Number.isFinite(branchInfo.ahead) ? branchInfo.ahead : '—'}↑/${Number.isFinite(branchInfo.behind) ? branchInfo.behind : '—'}↓`,
-          )
+        ? h(StatusChip, {
+            key: 'branch-chip',
+            section: true,
+            style: { alignSelf: 'flex-start' },
+            tone: Number.isFinite(branchInfo.behind) && branchInfo.behind > 0 ? 'warn' : 'info',
+            label: `${t('branchLinePrefix')}: ${branchInfo.branch ?? '—'} · ${Number.isFinite(branchInfo.ahead) ? branchInfo.ahead : '—'}↑/${Number.isFinite(branchInfo.behind) ? branchInfo.behind : '—'}↓`,
+          })
         : branchError !== ''
-          ? h('span', { style: { ...UI.hint, color: 'var(--dsw-alias-state-error-primary)' } }, branchError)
+          ? h(StatusChip, {
+              key: 'branch-error',
+              section: true,
+              style: { alignSelf: 'flex-start' },
+              tone: 'error',
+              label: branchError,
+              title: branchError,
+            })
           : null
 
       const prPanelBlock = prPending === null
@@ -1264,14 +1376,12 @@ window.__ModuleLoader__.load({
 
       // Статус в шапке: ошибка, загрузка, число изменений или чистое дерево.
       const chipTone = error !== ''
-        ? 'var(--dsw-alias-state-error-primary)'
+        ? 'error'
         : loading
-          ? 'var(--dsw-alias-state-warn-primary)'
+          ? 'warn'
           : state !== null
-            ? (Number(state.total) === 0
-              ? 'var(--dsw-alias-state-success-primary)'
-              : 'var(--dsw-alias-state-warn-primary)')
-            : 'var(--dsw-alias-label-tertiary)'
+            ? (Number(state.total) === 0 ? 'success' : 'warn')
+            : 'neutral'
       const chipLabel = error !== ''
         ? t('statusError')
         : loading
@@ -1367,16 +1477,12 @@ window.__ModuleLoader__.load({
           { key: 'project', title: t('sectionProject') },
           h(
             'div',
-            { className: 'dshrv-page-grid', style: UI.grid },
-            h(
-              'div',
-              { style: UI.field },
-              projectSelect,
-              branchLine,
-              projectsHint,
-              projectsErrorLine,
-            ),
-            h('div', { style: UI.field }, actionsRow),
+            { className: 'dshrv-page-project', style: UI.project },
+            projectSelect,
+            branchLine,
+            projectsHint,
+            projectsErrorLine,
+            actionsRow,
           ),
         ),
         prPanelBlock,
@@ -1389,7 +1495,12 @@ window.__ModuleLoader__.load({
             'div',
             { style: UI.row },
             state !== null
-              ? h('span', { style: UI.hint }, `${state.total} · +${state.added} / −${state.removed}`)
+              ? h(StatusChip, {
+                  key: 'changes-summary',
+                  section: true,
+                  tone: Number(state.total) === 0 ? 'success' : 'warn',
+                  label: `${state.total} ${t('filesCount')} · +${state.added} / −${state.removed}`,
+                })
               : null,
             noticeLine,
           ),
@@ -1408,7 +1519,11 @@ window.__ModuleLoader__.load({
                   style: { ...UI.file, ...(selected === file.path ? UI.fileActive : null) },
                   onClick: () => void showDiff(file),
                 },
-                h('span', { style: UI.kind }, t(KIND_LABEL[file.kind] ?? 'modified')),
+                h(StatusChip, {
+                  section: true,
+                  tone: KIND_TONE[file.kind] ?? 'neutral',
+                  label: t(KIND_LABEL[file.kind] ?? 'modified'),
+                }),
                 h(
                   'span',
                   { style: { flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflowWrap: 'anywhere' } },
