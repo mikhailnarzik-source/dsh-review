@@ -206,6 +206,64 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Единая система кнопок плагина (спека `.tools/plugin-design-spec-v2.md`):
+     * высота 36 px (маленькие в шапке — 32), padding 0 14, радиус 10,
+     * шрифт 600 12.5, ширина — по тексту. Все варианты — только токены темы.
+     *
+     * primary — мягкая заливка brand + текст brand. Белый фон с белым текстом
+     * запрещён: в тёмной теме brand-primary сам белый, поэтому старые
+     * `button-primary-fill` + `label-primary-inverted` давали нечитаемый текст.
+     */
+    const BTN_BASE = {
+      boxSizing: 'border-box',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      height: 36,
+      padding: '0 14px',
+      borderRadius: 10,
+      fontFamily: 'inherit',
+      fontSize: 12.5,
+      fontWeight: 600,
+      lineHeight: 1,
+      whiteSpace: 'nowrap',
+      cursor: 'pointer',
+      transition: 'background-color .14s ease, border-color .14s ease, color .14s ease',
+    }
+    const BTN = {
+      base: BTN_BASE,
+      primary: {
+        ...BTN_BASE,
+        border: '1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 55%, transparent)',
+        background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 18%, transparent)',
+        color: 'var(--dsw-alias-brand-primary)',
+      },
+      secondary: {
+        ...BTN_BASE,
+        border: '1px solid var(--dsw-alias-border-l4)',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-primary)',
+      },
+      danger: {
+        ...BTN_BASE,
+        border: '1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 50%, transparent)',
+        background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 16%, transparent)',
+        color: 'var(--dsw-alias-state-error-primary)',
+      },
+      small: { ...BTN_BASE, height: 32, padding: '0 12px' },
+      icon: {
+        ...BTN_BASE,
+        width: 32,
+        height: 32,
+        padding: 0,
+        border: '1px solid var(--dsw-alias-border-l4)',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary)',
+      },
+    }
+
+    /**
      * Страница плагина в едином стиле DSH: контент по центру (maxWidth 960),
      * шапка с иконкой и статусом, карточки-секции, адаптив в одну колонку.
      * Цвета — только токены темы; жёстких hex нет.
@@ -252,7 +310,7 @@ window.__ModuleLoader__.load({
         WebkitBoxOrient: 'vertical',
         overflow: 'hidden',
       },
-      headRight: { display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flex: '0 0 auto' },
+      headRight: { display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flex: '0 0 auto', flexWrap: 'wrap', minWidth: 0 },
       chip: {
         display: 'inline-flex',
         alignItems: 'center',
@@ -265,34 +323,8 @@ window.__ModuleLoader__.load({
         whiteSpace: 'nowrap',
       },
       dot: { width: 7, height: 7, borderRadius: '50%', flex: '0 0 auto' },
-      refresh: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: 32,
-        padding: '0 12px',
-        borderRadius: 10,
-        border: '1px solid var(--dsw-alias-border-l4)',
-        background: 'transparent',
-        color: 'var(--dsw-alias-label-primary)',
-        font: 'inherit',
-        fontSize: 12.5,
-        fontWeight: 600,
-        cursor: 'pointer',
-      },
-      iconButton: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 28,
-        height: 28,
-        padding: 0,
-        borderRadius: 8,
-        border: '1px solid var(--dsw-alias-border-l4)',
-        background: 'transparent',
-        color: 'var(--dsw-alias-label-secondary)',
-        cursor: 'pointer',
-      },
+      refresh: { ...BTN.secondary, height: 32 },
+      iconButton: { ...BTN.icon },
       card: {
         boxSizing: 'border-box',
         minWidth: 0,
@@ -309,59 +341,18 @@ window.__ModuleLoader__.load({
       sectionTitle: { margin: 0, fontSize: 14, fontWeight: 600, lineHeight: 1.3, color: 'var(--dsw-alias-label-primary)' },
       grid: {
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))',
         gap: 16,
-        alignItems: 'start',
+        alignItems: 'stretch',
+        minWidth: 0,
       },
-      row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+      row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 },
       field: { display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 },
       hint: { fontSize: 12, lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' },
       muted: { fontSize: 12, lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' },
-      primary: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: 36,
-        padding: '0 14px',
-        borderRadius: 10,
-        border: '1px solid transparent',
-        background: 'var(--dsw-alias-button-primary-fill)',
-        color: 'var(--dsw-alias-label-primary-inverted)',
-        font: 'inherit',
-        fontSize: 12.5,
-        fontWeight: 600,
-        cursor: 'pointer',
-      },
-      secondary: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: 36,
-        padding: '0 14px',
-        borderRadius: 10,
-        border: '1px solid var(--dsw-alias-border-l4)',
-        background: 'transparent',
-        color: 'var(--dsw-alias-label-primary)',
-        font: 'inherit',
-        fontSize: 12.5,
-        fontWeight: 600,
-        cursor: 'pointer',
-      },
-      danger: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: 32,
-        padding: '0 12px',
-        borderRadius: 10,
-        border: '1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 55%, transparent)',
-        background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent)',
-        color: 'var(--dsw-alias-state-error-primary)',
-        font: 'inherit',
-        fontSize: 12.5,
-        fontWeight: 600,
-        cursor: 'pointer',
-      },
+      primary: { ...BTN.primary },
+      secondary: { ...BTN.secondary },
+      danger: { ...BTN.danger },
       input: {
         boxSizing: 'border-box',
         width: '100%',
@@ -390,8 +381,8 @@ window.__ModuleLoader__.load({
       },
       select: {
         boxSizing: 'border-box',
+        width: '100%',
         height: 34,
-        maxWidth: 340,
         padding: '0 8px',
         borderRadius: 9,
         border: '1px solid var(--dsw-alias-border-l2)',
@@ -475,14 +466,25 @@ window.__ModuleLoader__.load({
       alertText: { fontSize: 12.5, lineHeight: 1.5, color: 'var(--dsw-alias-state-error-primary)' },
     }
 
-    /** CSS, который нельзя задать inline: адаптив, фокус, наведение и disabled. */
+    /** CSS, который нельзя задать inline: наведение, фокус, disabled и адаптив. */
     const PAGE_CSS = [
-      '.dshrv-page-grid{grid-template-columns:repeat(auto-fit,minmax(280px,1fr));}',
+      // Сетка карточек: auto-fit, одна колонка на узком экране.
+      '.dshrv-page-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));align-items:stretch;}',
+      // Кнопки — единая система: ширина по тексту, мягкие заливки из токенов.
+      '.dshrv-page-primary,.dshrv-page-button,.dshrv-page-danger,.dshrv-page-refresh,.dshrv-page-icon{flex:0 0 auto;min-width:0;}',
+      '.dshrv-page-primary:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-brand-primary) 28%,transparent) !important;}',
+      '.dshrv-page-button:hover:not(:disabled),.dshrv-page-refresh:hover:not(:disabled),.dshrv-page-icon:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover) !important;}',
+      '.dshrv-page-danger:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 24%,transparent) !important;}',
+      '.dshrv-page-primary:active:not(:disabled),.dshrv-page-button:active:not(:disabled),.dshrv-page-danger:active:not(:disabled){transform:translateY(1px);}',
       '.dshrv-page-field:focus-visible,.dshrv-page-primary:focus-visible,.dshrv-page-button:focus-visible,.dshrv-page-danger:focus-visible,.dshrv-page-refresh:focus-visible,.dshrv-page-icon:focus-visible{outline:2px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 55%,transparent);outline-offset:1px;}',
-      '.dshrv-page-primary:disabled,.dshrv-page-button:disabled,.dshrv-page-danger:disabled{opacity:.55;cursor:default;}',
-      '.dshrv-page-file{transition:background .14s ease;}',
+      '.dshrv-page-primary:disabled,.dshrv-page-button:disabled,.dshrv-page-danger:disabled,.dshrv-page-refresh:disabled{opacity:.55;cursor:default;}',
+      '.dshrv-page-file{transition:background .14s ease;overflow-wrap:anywhere;}',
       '.dshrv-page-file:hover{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 5%,transparent);}',
-      '@media (max-width: 760px){.dshrv-page{padding:18px 16px 32px !important;}.dshrv-page-grid{grid-template-columns:1fr !important;}}',
+      // Адаптив: длинные строки переносятся, кнопки — в строку по тексту.
+      '.dshrv-page{overflow-wrap:anywhere;}',
+      '.dshrv-page-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;margin-top:auto;}',
+      '@media (max-width: 900px){.dshrv-page{padding:20px 18px 36px !important;}.dshrv-page-grid{grid-template-columns:1fr !important;}}',
+      '@media (max-width: 640px){.dshrv-page{padding:16px 14px 28px !important;}.dshrv-page-head{gap:10px;}.dshrv-page-head-right{flex:1 1 100%;margin-left:0;}}',
     ].join('\n')
 
     let translate = (key) => key
@@ -531,7 +533,7 @@ window.__ModuleLoader__.load({
         ),
         h(
           'div',
-          { style: UI.headRight },
+          { className: 'dshrv-page-head-right', style: UI.headRight },
           h('span', { style: UI.chip }, h('span', { style: { ...UI.dot, background: chipTone } }), chipLabel),
           h(
             'button',
@@ -1045,7 +1047,7 @@ function ChangesCard() {
         : null
       const actionsRow = h(
         'div',
-        { style: UI.row },
+        { className: 'dshrv-page-actions', style: UI.row },
         h(
           'button',
           {
@@ -1122,7 +1124,7 @@ function ChangesCard() {
                 h('span', null, t('prBase')),
                 h('input', {
                   className: 'dshrv-page-field',
-                  style: { ...UI.input, flex: '0 1 160px', width: 'auto', minWidth: 120 },
+                  style: { ...UI.input, flex: '1 1 140px', width: 'auto', minWidth: 0 },
                   value: prPending.base,
                   onChange: (event) => setPrPending({ ...prPending, base: event.target.value }),
                 }),
@@ -1133,7 +1135,7 @@ function ChangesCard() {
                 h('span', null, t('prHead')),
                 h('input', {
                   className: 'dshrv-page-field',
-                  style: { ...UI.input, flex: '0 1 160px', width: 'auto', minWidth: 120 },
+                  style: { ...UI.input, flex: '1 1 140px', width: 'auto', minWidth: 0 },
                   value: prPending.head,
                   onChange: (event) => setPrPending({ ...prPending, head: event.target.value }),
                 }),
@@ -1370,7 +1372,7 @@ function ChangesCard() {
                 h('span', { style: UI.kind }, t(KIND_LABEL[file.kind] ?? 'modified')),
                 h(
                   'span',
-                  { style: { flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                  { style: { flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflowWrap: 'anywhere' } },
                   file.path,
                 ),
                 h(
