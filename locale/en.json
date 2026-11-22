@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Changes review",
-    "description": "Selected directory: tests, commit/push, branch and ahead/behind, GitHub pull request creation — with confirmations, timeouts and readable errors, without leaving DSH.",
+    "description": "A workspace after edits: changed files with a line-by-line diff, revert of a single file, tests, commit and push, branch with ahead/behind and GitHub pull request creation — without a terminal. Before writing anything the plugin lists the files and asks for confirmation, and it blocks secrets and dangerous paths. Find it under Plugins.",
     "detail": "docs/DETAIL.md"
   }
 }
