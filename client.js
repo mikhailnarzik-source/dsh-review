@@ -1,8 +1,9 @@
 /**
  * Browser half of `dsh-review`.
  *
- * Карточка в списке плагинов: свёрнута по умолчанию, внутри — файлы с
- * незакоммиченными изменениями, построчный diff и откат одного файла.
+ * Страница плагина: в центрированном контейнере — проект с тестами, файлы с
+ * незакоммиченными изменениями, построчный diff, откат одного файла, тесты,
+ * коммит с push и создание PR.
  * Данные приходят с host-части через POST-маршруты.
  */
 window.__ModuleLoader__.load({
@@ -102,6 +103,13 @@ window.__ModuleLoader__.load({
       branchInfoFailed: 'Could not read branch info',
       branchDetached: 'detached HEAD',
       branchLinePrefix: 'Branch',
+      sectionProject: 'Project',
+      sectionChanges: 'Changes',
+      statusIdle: 'Ready',
+      statusClean: 'Clean',
+      statusChanges: 'Files changed',
+      statusError: 'Error',
+      emptyHint: 'Edit files in the project and the list appears here.',
     }
     const ru = {
       title: 'Ревью изменений',
@@ -179,6 +187,13 @@ window.__ModuleLoader__.load({
       branchInfoFailed: 'Не удалось получить данные о ветке',
       branchDetached: 'HEAD оторван',
       branchLinePrefix: 'Ветка',
+      sectionProject: 'Проект',
+      sectionChanges: 'Изменения',
+      statusIdle: 'Готово',
+      statusClean: 'Чисто',
+      statusChanges: 'Файлов изменено',
+      statusError: 'Ошибка',
+      emptyHint: 'Измените файлы проекта — список появится здесь.',
     }
 
     const KIND_LABEL = {
@@ -190,97 +205,285 @@ window.__ModuleLoader__.load({
       conflict: 'conflict',
     }
 
-    const S = {
-      card: { display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13, maxWidth: 720 },
-      row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-      file: {
+    /**
+     * Страница плагина в едином стиле DSH: контент по центру (maxWidth 960),
+     * шапка с иконкой и статусом, карточки-секции, адаптив в одну колонку.
+     * Цвета — только токены темы; жёстких hex нет.
+     */
+    const UI = {
+      page: {
+        boxSizing: 'border-box',
+        width: '100%',
+        maxWidth: 960,
+        margin: '0 auto',
+        padding: '24px 28px 40px',
         display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '6px 8px',
-        borderRadius: 8,
-        border: '1px solid rgba(128,128,128,0.22)',
-        background: 'rgba(128,128,128,0.05)',
-        cursor: 'pointer',
-        fontSize: 12.5,
+        flexDirection: 'column',
+        gap: 16,
+        fontSize: 13,
+        lineHeight: 1.55,
+        color: 'var(--dsw-alias-label-primary)',
       },
-      button: {
-        padding: '6px 12px',
+      head: { display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' },
+      icon: {
+        boxSizing: 'border-box',
+        flex: '0 0 auto',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 52,
+        height: 52,
+        borderRadius: 14,
+        fontSize: 26,
+        lineHeight: 1,
+        background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 28%, transparent)',
+      },
+      headText: { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: '1 1 240px' },
+      title: { margin: 0, fontSize: 20, fontWeight: 600, lineHeight: 1.25, color: 'var(--dsw-alias-label-primary)' },
+      subtitle: {
+        margin: 0,
+        fontSize: 12.5,
+        fontWeight: 400,
+        lineHeight: 1.5,
+        color: 'var(--dsw-alias-label-secondary)',
+        display: '-webkit-box',
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: 'vertical',
+        overflow: 'hidden',
+      },
+      headRight: { display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flex: '0 0 auto' },
+      chip: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '3px 9px',
+        borderRadius: 999,
+        fontSize: 12,
+        color: 'var(--dsw-alias-label-secondary)',
+        background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)',
+        whiteSpace: 'nowrap',
+      },
+      dot: { width: 7, height: 7, borderRadius: '50%', flex: '0 0 auto' },
+      refresh: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 32,
+        padding: '0 12px',
+        borderRadius: 10,
+        border: '1px solid var(--dsw-alias-border-l4)',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+        fontSize: 12.5,
+        fontWeight: 600,
+        cursor: 'pointer',
+      },
+      iconButton: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 28,
+        height: 28,
+        padding: 0,
         borderRadius: 8,
-        border: '1px solid rgba(128,128,128,0.35)',
-        background: 'rgba(128,128,128,0.12)',
-        color: 'inherit',
+        border: '1px solid var(--dsw-alias-border-l4)',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary)',
+        cursor: 'pointer',
+      },
+      card: {
+        boxSizing: 'border-box',
+        minWidth: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        padding: 16,
+        borderRadius: 14,
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'var(--dsw-alias-bg-layer-1)',
+      },
+      sectionHead: { display: 'flex', alignItems: 'center', gap: 8 },
+      bar: { flex: '0 0 auto', width: 3, height: 14, borderRadius: 2, background: 'var(--dsw-alias-brand-primary)' },
+      sectionTitle: { margin: 0, fontSize: 14, fontWeight: 600, lineHeight: 1.3, color: 'var(--dsw-alias-label-primary)' },
+      grid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+        gap: 16,
+        alignItems: 'start',
+      },
+      row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+      field: { display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 },
+      hint: { fontSize: 12, lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' },
+      muted: { fontSize: 12, lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' },
+      primary: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 36,
+        padding: '0 14px',
+        borderRadius: 10,
+        border: '1px solid transparent',
+        background: 'var(--dsw-alias-button-primary-fill)',
+        color: 'var(--dsw-alias-label-primary-inverted)',
+        font: 'inherit',
+        fontSize: 12.5,
+        fontWeight: 600,
+        cursor: 'pointer',
+      },
+      secondary: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 36,
+        padding: '0 14px',
+        borderRadius: 10,
+        border: '1px solid var(--dsw-alias-border-l4)',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-primary)',
         font: 'inherit',
         fontSize: 12.5,
         fontWeight: 600,
         cursor: 'pointer',
       },
       danger: {
-        padding: '4px 10px',
-        borderRadius: 8,
-        border: '1px solid rgba(209,36,47,0.55)',
-        background: 'rgba(209,36,47,0.15)',
-        color: 'inherit',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 32,
+        padding: '0 12px',
+        borderRadius: 10,
+        border: '1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 55%, transparent)',
+        background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent)',
+        color: 'var(--dsw-alias-state-error-primary)',
         font: 'inherit',
-        fontSize: 12,
+        fontSize: 12.5,
         fontWeight: 600,
         cursor: 'pointer',
       },
-      panel: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        padding: '8px 10px',
-        borderRadius: 8,
-        border: '1px solid rgba(128,128,128,0.28)',
-        background: 'rgba(128,128,128,0.06)',
-      },
       input: {
-        flex: '1 1 260px',
-        minWidth: 200,
-        padding: '6px 8px',
-        borderRadius: 8,
-        border: '1px solid rgba(128,128,128,0.35)',
-        background: 'transparent',
+        boxSizing: 'border-box',
+        width: '100%',
+        height: 34,
+        padding: '0 10px',
+        borderRadius: 9,
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        color: 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+        fontSize: 12.5,
+      },
+      textarea: {
+        boxSizing: 'border-box',
+        width: '100%',
+        minHeight: 84,
+        padding: '8px 10px',
+        borderRadius: 9,
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        color: 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+        fontSize: 12.5,
+        lineHeight: 1.5,
+        resize: 'vertical',
+      },
+      select: {
+        boxSizing: 'border-box',
+        height: 34,
+        maxWidth: 340,
+        padding: '0 8px',
+        borderRadius: 9,
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'var(--dsw-alias-bg-layer-2)',
         color: 'inherit',
         font: 'inherit',
         fontSize: 12.5,
       },
-      muted: { fontSize: 12, opacity: 0.72 },
-      select: {
-        maxWidth: 340,
-        padding: '6px 8px',
-        borderRadius: 8,
-        border: '1px solid rgba(128,128,128,0.35)',
-        background: 'transparent',
-        color: 'inherit',
-        font: 'inherit',
+      file: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '10px 12px',
+        borderRadius: 10,
+        border: '1px solid transparent',
+        borderBottom: '1px solid var(--dsw-alias-border-l1)',
         fontSize: 12.5,
+        cursor: 'pointer',
+      },
+      fileActive: {
+        border: '1px solid var(--dsw-alias-brand-primary)',
+        background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 6%, transparent)',
+      },
+      kind: {
+        flex: '0 0 auto',
+        padding: '1px 8px',
+        borderRadius: 999,
+        fontSize: 10.5,
+        lineHeight: '18px',
+        color: 'var(--dsw-alias-label-secondary)',
+        background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent)',
       },
       fileName: {
         margin: 0,
-        padding: '6px 8px',
+        boxSizing: 'border-box',
+        padding: '8px 10px',
         borderRadius: 8,
-        background: 'rgba(128,128,128,0.08)',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        color: 'var(--dsw-alias-label-secondary)',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         fontSize: 11.5,
-        lineHeight: 1.4,
+        lineHeight: 1.45,
         maxHeight: 132,
         overflow: 'auto',
       },
       diff: {
         margin: 0,
+        boxSizing: 'border-box',
+        width: '100%',
         padding: '10px 12px',
         borderRadius: 10,
-        border: '1px solid rgba(128,128,128,0.28)',
-        background: 'rgba(128,128,128,0.07)',
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'var(--dsw-alias-bg-layer-2)',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         fontSize: 11.5,
         lineHeight: 1.45,
         maxHeight: 360,
         overflow: 'auto',
       },
+      empty: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        padding: '28px 12px',
+        textAlign: 'center',
+      },
+      emptyIcon: { fontSize: 32, lineHeight: 1 },
+      emptyText: { fontSize: 12.5, lineHeight: 1.5, color: 'var(--dsw-alias-label-tertiary)' },
+      alert: {
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        padding: '12px 14px',
+        borderRadius: 14,
+        border: '1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 42%, var(--dsw-alias-border-l2))',
+        background: 'color-mix(in srgb, var(--dsw-alias-state-error-primary) 9%, var(--dsw-alias-bg-layer-1))',
+      },
+      alertText: { fontSize: 12.5, lineHeight: 1.5, color: 'var(--dsw-alias-state-error-primary)' },
     }
+
+    /** CSS, который нельзя задать inline: адаптив, фокус, наведение и disabled. */
+    const PAGE_CSS = [
+      '.dshrv-page-grid{grid-template-columns:repeat(auto-fit,minmax(280px,1fr));}',
+      '.dshrv-page-field:focus-visible,.dshrv-page-primary:focus-visible,.dshrv-page-button:focus-visible,.dshrv-page-danger:focus-visible,.dshrv-page-refresh:focus-visible,.dshrv-page-icon:focus-visible{outline:2px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 55%,transparent);outline-offset:1px;}',
+      '.dshrv-page-primary:disabled,.dshrv-page-button:disabled,.dshrv-page-danger:disabled{opacity:.55;cursor:default;}',
+      '.dshrv-page-file{transition:background .14s ease;}',
+      '.dshrv-page-file:hover{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 5%,transparent);}',
+      '@media (max-width: 760px){.dshrv-page{padding:18px 16px 32px !important;}.dshrv-page-grid{grid-template-columns:1fr !important;}}',
+    ].join('\n')
 
     let translate = (key) => key
 
@@ -314,55 +517,74 @@ window.__ModuleLoader__.load({
       }
     }
 
-        /** Рамка карточки: тот же вид, что у остальных наших плагинов. */
-    function CardFrame({ children }) {
+    /** Шапка страницы: квадрат с иконкой, заголовок, статус-чип и «Обновить». */
+    function PageHeader({ icon, title, subtitle, chipLabel, chipTone, refreshLabel, onRefresh, open, onToggle }) {
       return h(
         'div',
-        {
-          style: {
-            position: 'relative',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-            padding: '10px 44px 12px 12px',
-            borderRadius: 10,
-            border: '1px solid rgba(128,128,128,0.28)',
-            background: 'rgba(128,128,128,0.07)',
-            boxSizing: 'border-box',
-          },
-        },
+        { className: 'dshrv-page-head', style: UI.head },
+        h('div', { style: UI.icon }, icon),
+        h(
+          'div',
+          { style: UI.headText },
+          h('h1', { style: UI.title }, title),
+          subtitle !== '' ? h('p', { style: UI.subtitle }, subtitle) : null,
+        ),
+        h(
+          'div',
+          { style: UI.headRight },
+          h('span', { style: UI.chip }, h('span', { style: { ...UI.dot, background: chipTone } }), chipLabel),
+          h(
+            'button',
+            { type: 'button', className: 'dshrv-page-refresh', style: UI.refresh, onClick: onRefresh },
+            refreshLabel,
+          ),
+          onToggle === undefined ? null : h(ToggleIcon, { open, onClick: onToggle }),
+        ),
+      )
+    }
+
+    /** Карточка-секция: акцентная полоска, заголовок 14/600 и содержимое. */
+    function SectionCard({ title, titleColor, children }) {
+      return h(
+        'section',
+        { style: UI.card },
+        h(
+          'div',
+          { style: UI.sectionHead },
+          h('span', { style: UI.bar }),
+          h(
+            'h2',
+            { style: titleColor === undefined ? UI.sectionTitle : { ...UI.sectionTitle, color: titleColor } },
+            title,
+          ),
+        ),
         children,
       )
     }
-    /** Кнопка-шеврон: развернуть и свернуть. Виден в любой теме (currentColor). */
+
+    /** Пустое состояние: иконка 32, текст tertiary и подсказка. */
+    function EmptyState({ icon, text, hint }) {
+      return h(
+        'div',
+        { style: UI.empty },
+        h('span', { style: UI.emptyIcon }, icon),
+        h('span', { style: UI.emptyText }, text),
+        hint === '' ? null : h('span', { style: UI.hint }, hint),
+      )
+    }
+
+    /** Кнопка-шеврон: свернуть страницу до шапки или развернуть обратно. */
     function ToggleIcon({ open, onClick }) {
       return h(
         'button',
         {
           type: 'button',
           onClick,
-          title: open ? 'Свернуть' : 'Открыть',
-          'aria-label': open ? 'Свернуть' : 'Открыть',
+          title: open ? translate('collapse') : translate('open'),
+          'aria-label': open ? translate('collapse') : translate('open'),
           'aria-expanded': open ? 'true' : 'false',
-          style: {
-            position: 'absolute',
-            // Свёрнутая карточка: по центру по вертикали. Развёрнутая: в углу.
-            top: open ? 8 : '50%',
-            transform: open ? 'none' : 'translateY(-50%)',
-            right: 8,
-            zIndex: 2,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 28,
-            height: 28,
-            padding: 0,
-            borderRadius: 8,
-            border: '1px solid rgba(128,128,128,0.32)',
-            background: 'rgba(128,128,128,0.1)',
-            color: 'inherit',
-            cursor: 'pointer',
-          },
+          className: 'dshrv-page-icon',
+          style: UI.iconButton,
         },
         h(
           'svg',
@@ -389,7 +611,7 @@ window.__ModuleLoader__.load({
 
 function ChangesCard() {
       const t = (key) => translate(key)
-      const [open, setOpen] = React.useState(false)
+      const [open, setOpen] = React.useState(true)
       const [state, setState] = React.useState(null)
       const [loading, setLoading] = React.useState(false)
       const [error, setError] = React.useState('')
@@ -790,42 +1012,21 @@ function ChangesCard() {
         }
       }
 
-      if (!open) {
-        return h(
-          'div',
-          {
-            style: {
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: '6px 10px',
-              borderRadius: 8,
-              border: '1px solid rgba(128,128,128,0.22)',
-              background: 'rgba(128,128,128,0.05)',
-              fontSize: 13,
-            },
-          },
-          h('span', { style: { fontWeight: 600 } }, t('heading')),
-          h('span', { style: { fontSize: 12, opacity: 0.6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, t('hint')),
-          h(ToggleIcon, { open: false, onClick: () => setOpen(true) }),
-        )
-      }
-
       const files = state?.files ?? []
 
       const busy = action !== ''
-      const actionButtonStyle = { ...S.button, opacity: busy ? 0.55 : 1, cursor: busy ? 'default' : 'pointer' }
       const noProjects = projectsReady && projects.length === 0 && projectsError === ''
       const canRunTests = !busy && !noProjects
       const projectSelect = projects.length > 0
         ? h(
             'label',
-            { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 } },
-            h('span', { style: { opacity: 0.72 } }, t('projectDirLabel')),
+            { style: { display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } },
+            h('span', null, t('projectDirLabel')),
             h(
               'select',
               {
-                style: S.select,
+                className: 'dshrv-page-field',
+                style: UI.select,
                 value: selectedDir,
                 disabled: busy,
                 onChange: (event) => setSelectedDir(event.target.value),
@@ -838,29 +1039,41 @@ function ChangesCard() {
             ),
           )
         : null
-      const projectsHint = noProjects
-        ? h('span', { style: { fontSize: 12, opacity: 0.72 } }, t('noProjects'))
-        : null
+      const projectsHint = noProjects ? h('span', { style: UI.hint }, t('noProjects')) : null
       const projectsErrorLine = projectsError !== ''
-        ? h('span', { style: { fontSize: 12, color: '#d1242f' } }, projectsError)
+        ? h('span', { style: { ...UI.hint, color: 'var(--dsw-alias-state-error-primary)' } }, projectsError)
         : null
       const actionsRow = h(
         'div',
-        { style: S.row },
-        projectSelect,
+        { style: UI.row },
         h(
           'button',
-          { style: { ...actionButtonStyle, opacity: canRunTests ? actionButtonStyle.opacity : 0.55 }, disabled: !canRunTests, onClick: () => void runTestsAction() },
+          {
+            className: 'dshrv-page-button',
+            style: { ...UI.secondary, opacity: canRunTests ? 1 : 0.55 },
+            disabled: !canRunTests,
+            onClick: () => void runTestsAction(),
+          },
           action === 'tests' ? t('working') : t('runTests'),
         ),
         h(
           'button',
-          { style: actionButtonStyle, disabled: busy, onClick: () => void beginCommitAndPush() },
+          {
+            className: 'dshrv-page-button',
+            style: { ...UI.secondary, opacity: busy ? 0.55 : 1 },
+            disabled: busy,
+            onClick: () => void beginCommitAndPush(),
+          },
           action === 'prepare' ? t('working') : t('commitPush'),
         ),
         h(
           'button',
-          { style: actionButtonStyle, disabled: busy, onClick: () => void beginPrCreate() },
+          {
+            className: 'dshrv-page-button',
+            style: { ...UI.secondary, opacity: busy ? 0.55 : 1 },
+            disabled: busy,
+            onClick: () => void beginPrCreate(),
+          },
           action === 'preparePr' ? t('working') : t('createPr'),
         ),
       )
@@ -868,60 +1081,59 @@ function ChangesCard() {
       const branchLine = branchInfo?.ok === true
         ? h(
             'span',
-            { style: { fontSize: 12, opacity: 0.82 } },
+            { style: UI.hint },
             `${t('branchLinePrefix')}: ${branchInfo.branch ?? '—'} · ${Number.isFinite(branchInfo.ahead) ? branchInfo.ahead : '—'}↑/${Number.isFinite(branchInfo.behind) ? branchInfo.behind : '—'}↓`,
           )
         : branchError !== ''
-          ? h('span', { style: { fontSize: 12, color: '#d1242f' } }, branchError)
+          ? h('span', { style: { ...UI.hint, color: 'var(--dsw-alias-state-error-primary)' } }, branchError)
           : null
 
       const prPanelBlock = prPending === null
         ? null
         : h(
-            'div',
-            { style: S.panel },
-            h(
-              'span',
-              { style: { fontSize: 12.5, fontWeight: 600 } },
-              `${t('prPanelTitle')}: ${prPending.head || '—'} → ${prPending.base || '—'}`,
-            ),
+            SectionCard,
+            { key: 'pr-panel', title: `${t('prPanelTitle')}: ${prPending.head || '—'} → ${prPending.base || '—'}` },
             prPending.github === null
-              ? h('span', { style: { fontSize: 12, color: '#d1242f' } }, t('prNoGithub'))
+              ? h('span', { style: { ...UI.hint, color: 'var(--dsw-alias-state-error-primary)' } }, t('prNoGithub'))
               : null,
             prPending.head !== '' && prPending.head === prPending.base
-              ? h('span', { style: { fontSize: 12, color: '#d1242f' } }, t('prMainWarning'))
+              ? h('span', { style: { ...UI.hint, color: 'var(--dsw-alias-state-error-primary)' } }, t('prMainWarning'))
               : null,
             h('input', {
-              style: S.input,
+              className: 'dshrv-page-field',
+              style: UI.input,
               value: prPending.title,
               placeholder: t('prTitle'),
               onChange: (event) => setPrPending({ ...prPending, title: event.target.value }),
             }),
             h('textarea', {
-              style: { ...S.input, minHeight: 84, resize: 'vertical', fontFamily: 'inherit' },
+              className: 'dshrv-page-field',
+              style: UI.textarea,
               value: prPending.body,
               placeholder: t('prBody'),
               onChange: (event) => setPrPending({ ...prPending, body: event.target.value }),
             }),
             h(
               'div',
-              { style: S.row },
+              { style: UI.row },
               h(
                 'label',
-                { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 } },
-                h('span', { style: { opacity: 0.72 } }, t('prBase')),
+                { style: { display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } },
+                h('span', null, t('prBase')),
                 h('input', {
-                  style: { ...S.input, flex: '0 1 160px', minWidth: 120 },
+                  className: 'dshrv-page-field',
+                  style: { ...UI.input, flex: '0 1 160px', width: 'auto', minWidth: 120 },
                   value: prPending.base,
                   onChange: (event) => setPrPending({ ...prPending, base: event.target.value }),
                 }),
               ),
               h(
                 'label',
-                { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 } },
-                h('span', { style: { opacity: 0.72 } }, t('prHead')),
+                { style: { display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } },
+                h('span', null, t('prHead')),
                 h('input', {
-                  style: { ...S.input, flex: '0 1 160px', minWidth: 120 },
+                  className: 'dshrv-page-field',
+                  style: { ...UI.input, flex: '0 1 160px', width: 'auto', minWidth: 120 },
                   value: prPending.head,
                   onChange: (event) => setPrPending({ ...prPending, head: event.target.value }),
                 }),
@@ -929,36 +1141,48 @@ function ChangesCard() {
             ),
             h(
               'div',
-              { style: S.row },
+              { style: UI.row },
               h(
                 'button',
-                { style: { ...S.button, opacity: busy ? 0.55 : 1 }, disabled: busy, onClick: () => void submitPr() },
+                {
+                  className: 'dshrv-page-primary',
+                  style: { ...UI.primary, opacity: busy ? 0.55 : 1 },
+                  disabled: busy,
+                  onClick: () => void submitPr(),
+                },
                 action === 'pr' ? t('working') : t('confirm'),
               ),
-              h('button', { style: S.button, disabled: busy, onClick: () => setPrPending(null) }, t('cancel')),
+              h(
+                'button',
+                { className: 'dshrv-page-button', style: UI.secondary, disabled: busy, onClick: () => setPrPending(null) },
+                t('cancel'),
+              ),
             ),
           )
 
       const pendingBlock = pending === null
         ? null
         : h(
-            'div',
-            { style: S.panel },
-            h(
+            SectionCard,
+            {
+              key: 'pending-panel',
+              title: `${t('confirmCommitPush')} ${pending.total} ${t('filesCount')}${pending.branch !== '' ? ` (${pending.branch})` : ''}`,
+            },
+            h('span', { style: UI.muted }, `${t('repoLabel')}: ${pending.repoPath || pending.repo || '—'}`),
+            h('span', { style: UI.muted }, `${t('projectDirResult')}: ${dirLabel(pending.dir)}`),
+            ...pending.warnings.map((line, index) => h(
               'span',
-              { style: { fontSize: 12.5, fontWeight: 600 } },
-              `${t('confirmCommitPush')} ${pending.total} ${t('filesCount')}${pending.branch !== '' ? ` (${pending.branch})` : ''}`,
-            ),
-            h('span', { style: S.muted }, `${t('repoLabel')}: ${pending.repoPath || pending.repo || '—'}`),
-            h('span', { style: S.muted }, `${t('projectDirResult')}: ${dirLabel(pending.dir)}`),
-            ...pending.warnings.map((line, index) => h('span', { key: `warning-${index}`, style: { fontSize: 12, color: '#d1242f' } }, line)),
+              { key: `warning-${index}`, style: { ...UI.hint, color: 'var(--dsw-alias-state-error-primary)' } },
+              line,
+            )),
             h(
               'pre',
-              { style: S.fileName },
+              { style: UI.fileName },
               pending.files.slice(0, 20).join('\n') + (pending.total > Math.min(pending.files.length, 20) ? `\n… +${pending.total - Math.min(pending.files.length, 20)}` : ''),
             ),
             h('input', {
-              style: S.input,
+              className: 'dshrv-page-field',
+              style: UI.input,
               value: pending.message,
               placeholder: t('commitMessage'),
               onChange: (event) => setPending({ ...pending, message: event.target.value }),
@@ -968,15 +1192,20 @@ function ChangesCard() {
             }),
             h(
               'div',
-              { style: S.row },
+              { style: UI.row },
               h(
                 'button',
-                { style: { ...S.button, opacity: busy ? 0.55 : 1 }, disabled: busy, onClick: () => void submitCommitAndPush() },
+                {
+                  className: 'dshrv-page-primary',
+                  style: { ...UI.primary, opacity: busy ? 0.55 : 1 },
+                  disabled: busy,
+                  onClick: () => void submitCommitAndPush(),
+                },
                 action === 'commit' ? t('working') : t('confirm'),
               ),
               h(
                 'button',
-                { style: S.button, disabled: busy, onClick: () => setPending(null) },
+                { className: 'dshrv-page-button', style: UI.secondary, disabled: busy, onClick: () => setPending(null) },
                 t('cancel'),
               ),
             ),
@@ -985,66 +1214,80 @@ function ChangesCard() {
       const resultBlock = actionResult === null
         ? null
         : h(
-            'div',
-            { style: S.panel },
-            h(
-              'span',
-              { style: { fontSize: 12.5, fontWeight: 600, color: actionResult.ok ? '#2f9e44' : '#d1242f' } },
-              actionResult.title,
-            ),
-            ...(actionResult.details ?? []).map((line, index) => h('span', { key: `detail-${index}`, style: S.muted }, line)),
+            SectionCard,
+            {
+              key: 'result-panel',
+              title: actionResult.title,
+              titleColor: actionResult.ok
+                ? 'var(--dsw-alias-state-success-primary)'
+                : 'var(--dsw-alias-state-error-primary)',
+            },
+            ...(actionResult.details ?? []).map((line, index) => h('span', { key: `detail-${index}`, style: UI.muted }, line)),
             typeof actionResult.output === 'string' && actionResult.output !== ''
-              ? h('pre', { style: { ...S.diff, maxHeight: 240 } }, actionResult.output)
+              ? h('pre', { style: { ...UI.diff, maxHeight: 240 } }, actionResult.output)
               : null,
-            actionResult.truncated === true ? h('span', { style: S.muted }, t('outputTruncated')) : null,
+            actionResult.truncated === true ? h('span', { style: UI.muted }, t('outputTruncated')) : null,
           )
 
-      const noticeLine = notice !== '' ? h('span', { style: { fontSize: 12, opacity: 0.75 } }, notice) : null
+      const noticeLine = notice !== '' ? h('span', { style: UI.hint }, notice) : null
 
-      return h(
-      'div',
-      { style: S.card },
-      h(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 10 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 600 } }, t('heading')),
-        h(ToggleIcon, { open: true, onClick: () => setOpen(false) }),
-      ),
-        h(
-          'div',
-          { style: S.row },
-          h('button', { style: S.button, onClick: () => { void load(); void loadProjects(); void loadBranchInfo() } }, loading ? t('loading') : t('refresh')),
-          state !== null
-            ? h(
-                'span',
-                { style: { fontSize: 12, opacity: 0.7 } },
-                `${state.total} · +${state.added} / −${state.removed}`,
-              )
-            : null,
-        ),
-        actionsRow,
-        branchLine,
-        projectsHint,
-        projectsErrorLine,
-        prPanelBlock,
-        pendingBlock,
-        resultBlock,
-        noticeLine,
+      // Статус в шапке: ошибка, загрузка, число изменений или чистое дерево.
+      const chipTone = error !== ''
+        ? 'var(--dsw-alias-state-error-primary)'
+        : loading
+          ? 'var(--dsw-alias-state-warn-primary)'
+          : state !== null
+            ? (Number(state.total) === 0
+              ? 'var(--dsw-alias-state-success-primary)'
+              : 'var(--dsw-alias-state-warn-primary)')
+            : 'var(--dsw-alias-label-tertiary)'
+      const chipLabel = error !== ''
+        ? t('statusError')
+        : loading
+          ? t('loading')
+          : state !== null
+            ? (Number(state.total) === 0 ? t('statusClean') : `${t('statusChanges')}: ${state.total}`)
+            : t('statusIdle')
+
+      const blocks = [
+        h('style', { key: 'page-css' }, PAGE_CSS),
+        h(PageHeader, {
+          key: 'page-head',
+          icon: '📝',
+          title: t('heading'),
+          subtitle: t('hint'),
+          chipLabel,
+          chipTone,
+          refreshLabel: loading ? t('loading') : t('refresh'),
+          onRefresh: () => {
+            void load()
+            void loadProjects()
+            void loadBranchInfo()
+          },
+          open,
+          onToggle: () => setOpen(!open),
+        }),
+      ]
+
+      if (!open) return h('div', { className: 'dshrv-page', style: UI.page }, blocks)
+
+      blocks.push(
         error !== ''
           ? h(
               'div',
-              { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-              h('span', { style: { fontSize: 12, color: '#d1242f' } }, error),
-              h('span', { style: { fontSize: 12, opacity: 0.7 } }, t('noGit')),
+              { key: 'error', style: UI.alert },
+              h('span', { style: UI.alertText }, error),
+              h('span', { style: UI.hint }, t('noGit')),
               confirm === '__init__'
                 ? h(
                     'div',
-                    { style: S.row },
-                    h('span', { style: { fontSize: 12 } }, t('initConfirm')),
+                    { style: UI.row },
+                    h('span', { style: UI.hint }, t('initConfirm')),
                     h(
                       'button',
                       {
-                        style: S.danger,
+                        className: 'dshrv-page-danger',
+                        style: UI.danger,
                         onClick: async () => {
                           try {
                             const result = await post(INIT_PATH, { confirm: true })
@@ -1061,91 +1304,130 @@ function ChangesCard() {
                       },
                       t('yes'),
                     ),
-                    h('button', { style: S.button, onClick: () => setConfirm('') }, t('no')),
+                    h(
+                      'button',
+                      { className: 'dshrv-page-button', style: UI.secondary, onClick: () => setConfirm('') },
+                      t('no'),
+                    ),
                   )
-                : h('button', { style: S.button, onClick: () => setConfirm('__init__') }, t('initGit')),
-            )
-          : null,
-        state !== null && files.length === 0 ? h('span', { style: { fontSize: 12, opacity: 0.7 } }, t('empty')) : null,
-        ...files.map((file) =>
-          h(
-            'div',
-            {
-              key: file.path,
-              style: { display: 'flex', flexDirection: 'column', gap: 6 },
-            },
-            h(
-              'div',
-              {
-                style: { ...S.file, borderColor: selected === file.path ? 'rgba(80,120,200,0.55)' : 'rgba(128,128,128,0.22)' },
-                onClick: () => void showDiff(file),
-              },
-              h(
-                'span',
-                {
-                  style: {
-                    fontSize: 10.5,
-                    padding: '1px 6px',
-                    borderRadius: 6,
-                    background: 'rgba(128,128,128,0.18)',
-                    flex: '0 0 auto',
-                  },
-                },
-                t(KIND_LABEL[file.kind] ?? 'modified'),
-              ),
-              h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, file.path),
-              h(
-                'span',
-                { style: { marginLeft: 'auto', fontSize: 11.5, opacity: 0.75, flex: '0 0 auto' } },
-                `+${file.added} / −${file.removed}`,
-              ),
-            ),
-            selected === file.path
-              ? h(
-                  'div',
-                  { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-                  h(
-                    'pre',
-                    { style: S.diff },
-                    ...diff.map((entry) =>
-                      h(
-                        'div',
-                        {
-                          key: entry.number,
-                          style: {
-                            color:
-                              entry.kind === 'add'
-                                ? '#2f9e44'
-                                : entry.kind === 'del'
-                                  ? '#d1242f'
-                                  : entry.kind === 'hunk'
-                                    ? 'rgba(120,150,220,0.95)'
-                                    : 'inherit',
-                            opacity: entry.kind === 'meta' ? 0.6 : 1,
-                          },
-                        },
-                        entry.line === '' ? ' ' : entry.line,
-                      ),
+                : h(
+                    'div',
+                    { style: UI.row },
+                    h(
+                      'button',
+                      { className: 'dshrv-page-button', style: UI.secondary, onClick: () => setConfirm('__init__') },
+                      t('initGit'),
                     ),
                   ),
-                  confirm === file.path
-                    ? h(
-                        'div',
-                        { style: S.row },
-                        h('span', { style: { fontSize: 12 } }, t('confirmRevert')),
-                        h('button', { style: S.danger, onClick: () => void revert(file) }, t('yes')),
-                        h('button', { style: S.button, onClick: () => setConfirm('') }, t('no')),
-                      )
-                    : h(
-                        'div',
-                        { style: S.row },
-                        h('button', { style: S.danger, onClick: () => setConfirm(file.path) }, t('revert')),
-                      ),
-                )
+            )
+          : null,
+        h(
+          SectionCard,
+          { key: 'project', title: t('sectionProject') },
+          h(
+            'div',
+            { className: 'dshrv-page-grid', style: UI.grid },
+            h(
+              'div',
+              { style: UI.field },
+              projectSelect,
+              branchLine,
+              projectsHint,
+              projectsErrorLine,
+            ),
+            h('div', { style: UI.field }, actionsRow),
+          ),
+        ),
+        prPanelBlock,
+        pendingBlock,
+        resultBlock,
+        h(
+          SectionCard,
+          { key: 'changes', title: t('sectionChanges') },
+          h(
+            'div',
+            { style: UI.row },
+            state !== null
+              ? h('span', { style: UI.hint }, `${state.total} · +${state.added} / −${state.removed}`)
               : null,
+            noticeLine,
+          ),
+          loading ? h('span', { style: UI.hint }, t('loading')) : null,
+          state !== null && files.length === 0
+            ? h(EmptyState, { icon: '📄', text: t('empty'), hint: t('emptyHint') })
+            : null,
+          ...files.map((file) =>
+            h(
+              'div',
+              { key: file.path, style: { display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 } },
+              h(
+                'div',
+                {
+                  className: 'dshrv-page-file',
+                  style: { ...UI.file, ...(selected === file.path ? UI.fileActive : null) },
+                  onClick: () => void showDiff(file),
+                },
+                h('span', { style: UI.kind }, t(KIND_LABEL[file.kind] ?? 'modified')),
+                h(
+                  'span',
+                  { style: { flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                  file.path,
+                ),
+                h(
+                  'span',
+                  { style: { marginLeft: 'auto', fontSize: 11.5, color: 'var(--dsw-alias-label-tertiary)', flex: '0 0 auto' } },
+                  `+${file.added} / −${file.removed}`,
+                ),
+              ),
+              selected === file.path
+                ? h(
+                    'div',
+                    { style: { display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 } },
+                    h(
+                      'pre',
+                      { style: UI.diff },
+                      ...diff.map((entry) =>
+                        h(
+                          'div',
+                          {
+                            key: entry.number,
+                            style: {
+                              color:
+                                entry.kind === 'add'
+                                  ? 'var(--dsw-alias-state-success-primary)'
+                                  : entry.kind === 'del'
+                                    ? 'var(--dsw-alias-state-error-primary)'
+                                    : entry.kind === 'hunk'
+                                      ? 'var(--dsw-alias-brand-primary)'
+                                      : 'inherit',
+                              opacity: entry.kind === 'meta' ? 0.6 : 1,
+                            },
+                          },
+                          entry.line === '' ? ' ' : entry.line,
+                        ),
+                      ),
+                    ),
+                    confirm === file.path
+                      ? h(
+                          'div',
+                          { style: UI.row },
+                          h('span', { style: UI.hint }, t('confirmRevert')),
+                          h('button', { className: 'dshrv-page-danger', style: UI.danger, onClick: () => void revert(file) }, t('yes')),
+                          h('button', { className: 'dshrv-page-button', style: UI.secondary, onClick: () => setConfirm('') }, t('no')),
+                        )
+                      : h(
+                          'div',
+                          { style: UI.row },
+                          h('button', { className: 'dshrv-page-danger', style: UI.danger, onClick: () => setConfirm(file.path) }, t('revert')),
+                        ),
+                  )
+                : null,
+            ),
           ),
         ),
       )
+
+      return h('div', { className: 'dshrv-page', style: UI.page }, blocks)
     }
 
     /** Содержимое карточки на странице своего плагина. */
@@ -1158,8 +1440,7 @@ function ChangesCard() {
             ? subject.id
             : ''
       if (packageName !== 'dsh-review') return null
-      const content = () => h(CardFrame, null, h(ChangesCard))
-      return typeof content === 'function' ? content(props) : content
+      return h(ChangesCard)
     }
 
     function apply(ctx) {
