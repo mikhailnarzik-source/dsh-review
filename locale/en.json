@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Changes review",
-    "description": "Uncommitted files, tests, commit and push: diff, single-file revert, test autodetection, secret-file guard — without leaving DSH.",
+    "description": "Uncommitted files, test directory selection and tests, commit and push: diff, single-file revert, test autodetection, secret-file guard — without leaving DSH.",
     "detail": "docs/DETAIL.md"
   }
 }

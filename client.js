@@ -18,6 +18,7 @@ window.__ModuleLoader__.load({
     const DIFF_PATH = '/api/dsh-review/diff'
     const REVERT_PATH = '/api/dsh-review/revert'
     const INIT_PATH = '/api/dsh-review/init'
+    const PROJECTS_PATH = '/api/dsh-review/projects'
     const TESTS_PATH = '/api/dsh-review/tests-run'
     const COMMIT_PATH = '/api/dsh-review/git-commit'
     const PUSH_PATH = '/api/dsh-review/git-push'
@@ -71,6 +72,12 @@ window.__ModuleLoader__.load({
       outputTruncated: 'Output truncated: head and tail shown.',
       ms: 'ms',
       sec: 's',
+      projectDirLabel: 'Directory',
+      workspaceRoot: 'workspace root',
+      noProjects: 'No package.json with scripts.test, gradlew or *.sln/*.csproj found.',
+      needChooseProject: 'Several test directories found — choose one in the list.',
+      projectDirResult: 'directory',
+      projectsFailed: 'Could not list test directories',
     }
     const ru = {
       title: 'Ревью изменений',
@@ -121,6 +128,12 @@ window.__ModuleLoader__.load({
       outputTruncated: 'Вывод обрезан: показаны начало и хвост.',
       ms: 'мс',
       sec: 'с',
+      projectDirLabel: 'Каталог',
+      workspaceRoot: 'корень воркспейса',
+      noProjects: 'Не найден package.json с scripts.test, gradlew или *.sln/*.csproj.',
+      needChooseProject: 'Несколько каталогов с тестами — выберите один в списке.',
+      projectDirResult: 'каталог',
+      projectsFailed: 'Не удалось получить список каталогов',
     }
 
     const KIND_LABEL = {
@@ -189,6 +202,16 @@ window.__ModuleLoader__.load({
         fontSize: 12.5,
       },
       muted: { fontSize: 12, opacity: 0.72 },
+      select: {
+        maxWidth: 340,
+        padding: '6px 8px',
+        borderRadius: 8,
+        border: '1px solid rgba(128,128,128,0.35)',
+        background: 'transparent',
+        color: 'inherit',
+        font: 'inherit',
+        fontSize: 12.5,
+      },
       fileName: {
         margin: 0,
         padding: '6px 8px',
@@ -312,6 +335,10 @@ function ChangesCard() {
       const [action, setAction] = React.useState('')
       const [actionResult, setActionResult] = React.useState(null)
       const [pending, setPending] = React.useState(null)
+      const [projects, setProjects] = React.useState([])
+      const [selectedDir, setSelectedDir] = React.useState('')
+      const [projectsReady, setProjectsReady] = React.useState(false)
+      const [projectsError, setProjectsError] = React.useState('')
 
       const load = React.useCallback(async () => {
         setLoading(true)
@@ -326,6 +353,28 @@ function ChangesCard() {
           setLoading(false)
         }
       }, [])
+
+      // Список каталогов с тестами: заполняется при монтировании и по «Обновить».
+      const loadProjects = React.useCallback(async () => {
+        try {
+          const data = await post(PROJECTS_PATH, {})
+          const candidates = data?.ok === true && Array.isArray(data.candidates) ? data.candidates : []
+          setProjects(candidates)
+          setProjectsError(data?.ok === true ? '' : String(data?.message ?? t('projectsFailed')))
+          setSelectedDir((previous) => {
+            if (candidates.some(candidate => candidate.rel === previous)) return previous
+            return candidates[0]?.rel ?? ''
+          })
+        } catch (cause) {
+          setProjectsError(String(cause?.message ?? cause))
+        } finally {
+          setProjectsReady(true)
+        }
+      }, [])
+
+      React.useEffect(() => {
+        void loadProjects()
+      }, [loadProjects])
 
       React.useEffect(() => {
         if (!open) return
@@ -369,6 +418,11 @@ function ChangesCard() {
         return `${(ms / 1000).toFixed(1)} ${t('sec')}`
       }
 
+      const dirLabel = (dir) => {
+        if (typeof dir !== 'string' || dir === '') return '—'
+        return dir === '.' ? t('workspaceRoot') : dir
+      }
+
       // «Прогнать тесты»: маршрут сам определяет команду и обрезает вывод.
       const runTestsAction = async () => {
         if (action !== '') return
@@ -376,7 +430,36 @@ function ChangesCard() {
         setActionResult(null)
         setNotice('')
         try {
-          const data = await post(TESTS_PATH, {})
+          const payload = selectedDir !== '' ? { dir: selectedDir } : {}
+          const data = await post(TESTS_PATH, payload)
+          if (data?.needsChoice === true) {
+            const candidates = Array.isArray(data.candidates) ? data.candidates : []
+            if (candidates.length > 0) {
+              setProjects(candidates)
+              setSelectedDir((previous) => {
+                if (candidates.some(candidate => candidate.rel === previous)) return previous
+                return candidates[0].rel
+              })
+            }
+            setActionResult({
+              ok: false,
+              title: t('needChooseProject'),
+              details: candidates.map(candidate => `${candidate.label} — ${candidate.rel}`),
+              output: '',
+              truncated: false,
+            })
+            return
+          }
+          if (typeof data?.command !== 'string') {
+            setActionResult({
+              ok: false,
+              title: String(data?.message ?? t('failed')),
+              details: [],
+              output: '',
+              truncated: false,
+            })
+            return
+          }
           const ok = data?.ok === true
           const title = ok
             ? t('testsPassed')
@@ -390,6 +473,7 @@ function ChangesCard() {
             ok,
             title,
             details: [
+              `${t('projectDirResult')}: ${dirLabel(data?.dir)}`,
               `${data?.command ?? '—'}`,
               `${t('codeLabel')}: ${data?.exitCode ?? '—'}; ${t('durationLabel')}: ${formatDuration(data?.durationMs)}${counts !== '' ? `; ${counts}` : ''}`,
             ],
@@ -503,12 +587,42 @@ function ChangesCard() {
 
       const busy = action !== ''
       const actionButtonStyle = { ...S.button, opacity: busy ? 0.55 : 1, cursor: busy ? 'default' : 'pointer' }
+      const noProjects = projectsReady && projects.length === 0 && projectsError === ''
+      const canRunTests = !busy && !noProjects
+      const projectSelect = projects.length > 0
+        ? h(
+            'label',
+            { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 } },
+            h('span', { style: { opacity: 0.72 } }, t('projectDirLabel')),
+            h(
+              'select',
+              {
+                style: S.select,
+                value: selectedDir,
+                disabled: busy,
+                onChange: (event) => setSelectedDir(event.target.value),
+              },
+              ...projects.map(candidate => h(
+                'option',
+                { key: candidate.rel, value: candidate.rel },
+                `${candidate.label} — ${candidate.rel === '.' ? t('workspaceRoot') : candidate.rel}`,
+              )),
+            ),
+          )
+        : null
+      const projectsHint = noProjects
+        ? h('span', { style: { fontSize: 12, opacity: 0.72 } }, t('noProjects'))
+        : null
+      const projectsErrorLine = projectsError !== ''
+        ? h('span', { style: { fontSize: 12, color: '#d1242f' } }, projectsError)
+        : null
       const actionsRow = h(
         'div',
         { style: S.row },
+        projectSelect,
         h(
           'button',
-          { style: actionButtonStyle, disabled: busy, onClick: () => void runTestsAction() },
+          { style: { ...actionButtonStyle, opacity: canRunTests ? actionButtonStyle.opacity : 0.55 }, disabled: !canRunTests, onClick: () => void runTestsAction() },
           action === 'tests' ? t('working') : t('runTests'),
         ),
         h(
@@ -589,7 +703,7 @@ function ChangesCard() {
         h(
           'div',
           { style: S.row },
-          h('button', { style: S.button, onClick: () => void load() }, loading ? t('loading') : t('refresh')),
+          h('button', { style: S.button, onClick: () => { void load(); void loadProjects() } }, loading ? t('loading') : t('refresh')),
           state !== null
             ? h(
                 'span',
@@ -599,6 +713,8 @@ function ChangesCard() {
             : null,
         ),
         actionsRow,
+        projectsHint,
+        projectsErrorLine,
         pendingBlock,
         resultBlock,
         noticeLine,

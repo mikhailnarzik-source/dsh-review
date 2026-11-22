@@ -6,7 +6,7 @@
  * `git` и команда тестов проекта; сетевых запросов нет.
  */
 import { readChanges, readDiff, revertFile, initRepository } from './lib/changes.mjs'
-import { runTests } from './lib/tests.mjs'
+import { runTests, detectProjects } from './lib/tests.mjs'
 import { commitChanges, pushChanges } from './lib/git.mjs'
 
 export const name = 'dsh-review'
@@ -16,6 +16,7 @@ const STATE_PATH = '/api/dsh-review/state'
 const DIFF_PATH = '/api/dsh-review/diff'
 const REVERT_PATH = '/api/dsh-review/revert'
 const INIT_PATH = '/api/dsh-review/init'
+const PROJECTS_PATH = '/api/dsh-review/projects'
 const TESTS_PATH = '/api/dsh-review/tests-run'
 const COMMIT_PATH = '/api/dsh-review/git-commit'
 const PUSH_PATH = '/api/dsh-review/git-push'
@@ -104,6 +105,17 @@ function formatChanges(dir, changes, filePath, diffLines) {
 
 /** Текст для инструмента `tests_run`. */
 function formatTests(result) {
+  // Тесты не запускались: нет подходящего каталога или нужно выбрать его явно.
+  if (result?.ok !== true && typeof result?.command !== 'string') {
+    const lines = [`ТЕСТЫ НЕ ЗАПУЩЕНЫ: ${result?.message ?? 'причина неизвестна'}`]
+    if (result?.needsChoice === true) {
+      lines.push('Выберите каталог параметром dir (путь относительно корня воркспейса):')
+      for (const candidate of result.candidates ?? []) {
+        lines.push(`- ${candidate.label} — ${candidate.rel} (dir: "${candidate.rel}")`)
+      }
+    }
+    return lines.join('\n')
+  }
   const status = result?.ok === true
     ? 'ТЕСТЫ ПРОШЛИ'
     : result?.timedOut === true
@@ -114,7 +126,7 @@ function formatTests(result) {
     : ''
   const lines = [
     `${status}: ${result?.command ?? '—'}`,
-    `код: ${result?.exitCode ?? '—'}; длительность: ${formatDuration(result?.durationMs)}${counts}`,
+    `каталог: ${result?.dir ?? '—'}; код: ${result?.exitCode ?? '—'}; длительность: ${formatDuration(result?.durationMs)}${counts}`,
   ]
   if (result?.truncated === true) lines.push('(вывод обрезан: начало и хвост)')
   if (typeof result?.message === 'string' && result.message !== '') lines.push(`ошибка запуска: ${result.message}`)
@@ -228,14 +240,33 @@ export function apply(ctx) {
       })
 
       ctx.connection.fetch.register({
+        path: PROJECTS_PATH,
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: async () => {
+          try {
+            const root = await projectDir(ctx)
+            const candidates = detectProjects(root)
+            return json({ ok: true, dir: root, candidates })
+          } catch (error) {
+            return json({ ok: false, message: error instanceof Error ? error.message : String(error) })
+          }
+        },
+      })
+
+      ctx.connection.fetch.register({
         path: TESTS_PATH,
         methods: ['POST'],
         requestBody: 'buffered',
         fetch: async (request) => {
           try {
             const body = await readBody(request)
-            const dir = await projectDir(ctx)
-            const result = await runTests(dir, { command: body.command, timeoutSec: body.timeoutSec })
+            const root = await projectDir(ctx)
+            const result = await runTests(root, {
+              dir: body.dir,
+              command: body.command,
+              timeoutSec: body.timeoutSec,
+            })
             return json(result)
           } catch (error) {
             return json({ ok: false, message: error instanceof Error ? error.message : String(error) })
@@ -305,10 +336,14 @@ export function apply(ctx) {
   try {
     ctx.tools.register({
       name: 'tests_run',
-      description: 'Запустить тесты проекта: команда определяется автоматически (npm/pnpm test, Gradle, dotnet), вывод обрезается до начала и хвоста, таймаут по умолчанию 600 с.',
+      description: 'Запустить тесты проекта. Каталог с тестами выбирается автоматически (корень, затем глубина 1–2): если кандидатов несколько, вернётся список и нужен параметр dir. Команда определяется автоматически, вывод обрезается, таймаут по умолчанию 600 с.',
       parameters: {
         type: 'object',
         properties: {
+          dir: {
+            type: 'string',
+            description: 'Каталог проекта относительно корня воркспейса, например ".publish/dsh-review"; "." — сам корень. Без параметра берётся корень или единственный найденный проект.',
+          },
           command: {
             type: 'string',
             description: 'Команда оболочки вместо автодетекта, например "npm test -- --watch=false". Запускается в каталоге проекта.',
@@ -321,8 +356,12 @@ export function apply(ctx) {
       },
       output: TEXT_OUTPUT,
       async execute(input) {
-        const dir = await projectDir(ctx)
-        const result = await runTests(dir, { command: input?.command, timeoutSec: input?.timeoutSec })
+        const root = await projectDir(ctx)
+        const result = await runTests(root, {
+          dir: input?.dir,
+          command: input?.command,
+          timeoutSec: input?.timeoutSec,
+        })
         return formatTests(result)
       },
     })

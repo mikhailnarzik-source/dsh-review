@@ -119,6 +119,7 @@ test('runTests: успешный запуск через автодетект np
   try {
     const result = await runTests(dir, { timeoutSec: 120 })
     assert.equal(result.ok, true)
+    assert.equal(result.dir, '.')
     assert.equal(result.command, 'npm test')
     assert.equal(result.exitCode, 0)
     assert.ok(result.output.includes('TESTS-OK-123'))
@@ -135,7 +136,7 @@ test('runTests: падение возвращает ненулевой код', 
     'fail.js': "console.error('boom'); process.exit(3)\n",
   })
   try {
-    const result = await runTests(dir, { command: 'node fail.js', timeoutSec: 60 })
+    const result = await runTests(dir, { dir: '.', command: 'node fail.js', timeoutSec: 60 })
     assert.equal(result.ok, false)
     assert.equal(result.command, 'node fail.js')
     assert.equal(result.exitCode, 3)
@@ -150,7 +151,7 @@ test('runTests: таймаут убивает процесс', async () => {
     'sleep.js': 'setTimeout(() => {}, 60000)\n',
   })
   try {
-    const result = await runTests(dir, { command: 'node sleep.js', timeoutSec: 1 })
+    const result = await runTests(dir, { dir: '.', command: 'node sleep.js', timeoutSec: 1 })
     assert.equal(result.ok, false)
     assert.equal(result.timedOut, true)
     assert.ok(result.durationMs < 15000)

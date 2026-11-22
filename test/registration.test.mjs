@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -63,6 +63,8 @@ test('index.js регистрирует инструменты и POST-марш�
   assert.deepEqual(push.parameters.required, ['confirm'])
   const tests = ctx.toolsList.find(tool => tool.name === 'tests_run')
   assert.equal('required' in tests.parameters, false)
+  assert.ok(tests.parameters.properties.dir, 'tests_run: параметр dir')
+  assert.ok(tests.parameters.properties.command, 'tests_run: параметр command')
 
   const routes = ctx.routesList.map(route => route.path).sort()
   assert.deepEqual(routes, [
@@ -70,6 +72,7 @@ test('index.js регистрирует инструменты и POST-марш�
     '/api/dsh-review/git-commit',
     '/api/dsh-review/git-push',
     '/api/dsh-review/init',
+    '/api/dsh-review/projects',
     '/api/dsh-review/revert',
     '/api/dsh-review/state',
     '/api/dsh-review/tests-run',
@@ -119,6 +122,30 @@ test('инструменты git_commit и git_push требуют confirm:true'
   await assert.rejects(() => push.execute({ confirm: false }), /подтвержд/)
 })
 
+test('маршрут projects возвращает каталоги с тестами', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'review-route-projects-'))
+  try {
+    await mkdir(join(dir, 'app'), { recursive: true })
+    await writeFile(
+      join(dir, 'app', 'package.json'),
+      JSON.stringify({ name: 'app', scripts: { test: 'node --test' } }),
+      'utf8',
+    )
+    const module = await import('../index.js')
+    const ctx = fakeContext({ projectDir: dir })
+    module.apply(ctx)
+    const payload = await callRoute(ctx, '/api/dsh-review/projects', {})
+    assert.equal(payload.ok, true)
+    assert.equal(payload.dir, dir)
+    assert.equal(payload.candidates.length, 1)
+    assert.equal(payload.candidates[0].rel, 'app')
+    assert.equal(payload.candidates[0].label, 'app')
+    assert.equal(payload.candidates[0].kind, 'npm')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('маршрут tests-run запускает команду в каталоге проекта', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'review-route-tests-'))
   try {
@@ -126,14 +153,38 @@ test('маршрут tests-run запускает команду в катало
     const module = await import('../index.js')
     const ctx = fakeContext({ projectDir: dir })
     module.apply(ctx)
-    const payload = await callRoute(ctx, '/api/dsh-review/tests-run', { command: 'node ok.js', timeoutSec: 60 })
+    const payload = await callRoute(ctx, '/api/dsh-review/tests-run', { dir: '.', command: 'node ok.js', timeoutSec: 60 })
     assert.equal(payload.ok, true)
+    assert.equal(payload.dir, '.')
     assert.equal(payload.command, 'node ok.js')
     assert.equal(payload.exitCode, 0)
     assert.ok(payload.output.includes('ROUTE-TESTS-OK'))
     assert.equal(typeof payload.durationMs, 'number')
     assert.equal(typeof payload.truncated, 'boolean')
     assert.ok(payload.passed === null || typeof payload.passed === 'number')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('маршрут tests-run без dir при нескольких кандидатах возвращает needsChoice', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'review-route-choice-'))
+  try {
+    for (const name of ['a', 'b']) {
+      await mkdir(join(dir, name), { recursive: true })
+      await writeFile(
+        join(dir, name, 'package.json'),
+        JSON.stringify({ name, scripts: { test: 'node --test' } }),
+        'utf8',
+      )
+    }
+    const module = await import('../index.js')
+    const ctx = fakeContext({ projectDir: dir })
+    module.apply(ctx)
+    const payload = await callRoute(ctx, '/api/dsh-review/tests-run', {})
+    assert.equal(payload.ok, false)
+    assert.equal(payload.needsChoice, true)
+    assert.equal(payload.candidates.length, 2)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
