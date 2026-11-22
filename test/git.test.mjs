@@ -12,10 +12,12 @@ import {
   findDangerousPaths,
   findSecretPaths,
   gitStatus,
+  lastLines,
   lookLikeSecret,
   pushChanges,
   readStatusFiles,
   resolveRepoRoot,
+  tailText,
 } from '../lib/git.mjs'
 
 const run = promisify(execFile)
@@ -51,6 +53,26 @@ test('секреты: типичные имена файлов распозна�
   assert.equal(lookLikeSecret('environment.md'), false)
   assert.equal(lookLikeSecret('keyboard.js'), false)
   assert.deepEqual(findSecretPaths(['src/app.js', '.env', 'cert.pem']), ['.env', 'cert.pem'])
+})
+
+test('ошибки: последние строки сохраняют fatal, хвост не теряется', () => {
+  const output = [
+    'warning: in the working copy of .gitattributes',
+    'error: external filter failed',
+    'error: external filter failed',
+    'fatal: adding files failed',
+    'tail line',
+  ].join('\n')
+  const tail = lastLines(output, 3)
+  assert.ok(tail.includes('fatal: adding files failed'))
+  assert.ok(tail.includes('tail line'))
+  assert.ok(!tail.includes('warning: in the working copy'))
+
+  const long = `${'начало '.repeat(500)}fatal: конец`
+  const clipped = tailText(long, 100)
+  assert.ok(clipped.length <= 140)
+  assert.ok(clipped.includes('fatal: конец'))
+  assert.ok(clipped.includes('обрезано начало'))
 })
 
 test('опасные пути: служебные каталоги и логи', () => {
@@ -342,6 +364,96 @@ test('push: недопустимая ветка отклоняется', async (
     const result = await pushChanges({ rootDir: dir, dir: '.', confirm: true, branch: '--force' })
     assert.equal(result.ok, false)
     assert.match(result.message, /ветка|branch/i)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('resolveRepoRoot: подкаталог чужого репозитория — «установленная копия» с подсказкой', async () => {
+  const root = await repository('review-toplevel-')
+  try {
+    const sub = join(root, 'plugins', 'app')
+    await mkdir(sub, { recursive: true })
+    await writeFile(join(sub, 'index.js'), 'x\n', 'utf8')
+
+    const resolved = await resolveRepoRoot(root, 'plugins/app')
+    assert.equal(resolved.ok, false)
+    assert.match(resolved.message, /установленная копия/)
+    assert.match(resolved.message, /\.publish\/app/)
+    assert.equal(resolved.repo, '.')
+
+    const commit = await commitChanges({ rootDir: root, dir: 'plugins/app', message: 'x', confirm: true })
+    assert.equal(commit.ok, false)
+    assert.match(commit.message, /установленная копия/)
+
+    const atRoot = await resolveRepoRoot(root, '.')
+    assert.equal(atRoot.ok, true)
+    assert.equal(atRoot.rel, '.')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('коммит: большой неотслеживаемый каталог считается до add и отклоняется', async () => {
+  const dir = await repository('review-big-dir-')
+  try {
+    const big = join(dir, 'big')
+    await mkdir(big, { recursive: true })
+    for (let index = 0; index < MAX_COMMIT_FILES + 10; index += 1) {
+      await writeFile(join(big, `file-${index}.txt`), 'x\n', 'utf8')
+    }
+
+    const status = await gitStatus({ rootDir: dir, dir: '.' })
+    assert.equal(status.ok, true)
+    assert.equal(status.total, MAX_COMMIT_FILES + 1)
+    assert.equal(status.capped, true)
+    assert.ok(status.warnings.some(warning => /лимит/.test(warning) && warning.includes('500')))
+
+    const result = await commitChanges({ rootDir: dir, dir: '.', message: 'big', confirm: true })
+    assert.equal(result.ok, false)
+    assert.match(result.message, /изменённых файлов больше 500/)
+    assert.match(result.message, /gitignore/)
+    const staged = await git(dir, ['diff', '--cached', '--name-only'])
+    assert.equal(staged.trim(), '', 'git add не выполнялся')
+    assert.ok((await statusPaths(dir)).includes('big/'))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('коммит: .gitignore исключает большой каталог — коммит проходит', async () => {
+  const dir = await repository('review-ignored-dir-')
+  try {
+    await writeFile(join(dir, '.gitignore'), 'big/\n', 'utf8')
+    const big = join(dir, 'big')
+    await mkdir(big, { recursive: true })
+    for (let index = 0; index < MAX_COMMIT_FILES + 10; index += 1) {
+      await writeFile(join(big, `file-${index}.txt`), 'x\n', 'utf8')
+    }
+    const result = await commitChanges({ rootDir: dir, dir: '.', message: 'только gitignore', confirm: true })
+    assert.equal(result.ok, true, JSON.stringify({ message: result.message, total: result.total }))
+    assert.ok(result.files.includes('.gitignore'))
+    assert.ok(!result.files.includes('big/'))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('коммит: fatal от git add возвращается в message и output', async () => {
+  const dir = await repository('review-fatal-add-')
+  try {
+    await git(dir, ['config', 'filter.broken.clean', 'exit 1'])
+    await git(dir, ['config', 'filter.broken.required', 'true'])
+    await writeFile(join(dir, '.gitattributes'), '*.txt filter=broken\n', 'utf8')
+    await writeFile(join(dir, 'a.txt'), 'hello\n', 'utf8')
+
+    const result = await commitChanges({ rootDir: dir, dir: '.', message: 'сломанный фильтр', confirm: true })
+    assert.equal(result.ok, false)
+    assert.match(result.message, /git add завершился ошибкой/)
+    assert.match(result.message, /fatal:/)
+    assert.match(result.output, /fatal:/)
+    assert.equal(result.exitCode, 128)
+    assert.match(lastLines(result.message, 5), /fatal:/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

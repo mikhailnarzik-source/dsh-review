@@ -84,6 +84,7 @@ window.__ModuleLoader__.load({
       warningsLabel: 'warnings',
       requestTimeout: 'Request timeout',
       hashLabel: 'hash',
+      choosePublishHint: 'Choose a directory with its own repository, e.g. .publish/<name>.',
     }
     const ru = {
       title: 'Ревью изменений',
@@ -145,6 +146,7 @@ window.__ModuleLoader__.load({
       warningsLabel: 'предупреждения',
       requestTimeout: 'Таймаут запроса',
       hashLabel: 'hash',
+      choosePublishHint: 'Выберите каталог с собственным репозиторием, например .publish/<имя>.',
     }
 
     const KIND_LABEL = {
@@ -528,13 +530,16 @@ function ChangesCard() {
           const dir = selectedDir !== '' ? selectedDir : '.'
           const status = await post(GIT_STATUS_PATH, { dir })
           if (status?.ok !== true) {
+            const message = String(status?.message ?? t('gitStatusFailed'))
             const details = [`${t('projectDirResult')}: ${dirLabel(dir)}`]
-            if (typeof status?.repo === 'string' && status.repo !== '') details.push(`${t('repoLabel')}: ${status.repo}`)
+            if (typeof status?.repoPath === 'string' && status.repoPath !== '') details.push(`${t('repoLabel')}: ${status.repoPath}`)
+            else if (typeof status?.repo === 'string' && status.repo !== '') details.push(`${t('repoLabel')}: ${status.repo}`)
+            if (/установленная копия|не является git-репозиторием/i.test(message)) details.push(t('choosePublishHint'))
             setActionResult({
               ok: false,
-              title: String(status?.message ?? t('gitStatusFailed')),
+              title: message,
               details,
-              output: '',
+              output: typeof status?.output === 'string' ? status.output : '',
               truncated: false,
             })
             return
@@ -548,6 +553,7 @@ function ChangesCard() {
           setPending({
             dir,
             repo: typeof status.repo === 'string' ? status.repo : '',
+            repoPath: typeof status.repoPath === 'string' ? status.repoPath : '',
             branch: typeof status.branch === 'string' ? status.branch : '',
             files,
             total,
@@ -575,16 +581,20 @@ function ChangesCard() {
         try {
           const commit = await post(COMMIT_PATH, { dir: pending.dir, message, paths: 'all', confirm: true })
           if (commit?.ok !== true) {
+            const failure = String(commit?.message ?? t('commitFailed'))
             const details = []
-            if (typeof commit?.repo === 'string' && commit.repo !== '') {
+            if (typeof commit?.repoPath === 'string' && commit.repoPath !== '') {
+              details.push(`${t('repoLabel')}: ${commit.repoPath}${commit?.branch ? ` (${commit.branch})` : ''}`)
+            } else if (typeof commit?.repo === 'string' && commit.repo !== '') {
               details.push(`${t('repoLabel')}: ${commit.repo}${commit?.branch ? ` (${commit.branch})` : ''}`)
             }
             if (Array.isArray(commit?.files) && commit.files.length > 0) {
               details.push(`${commit.files.length} ${t('filesCount')}: ${commit.files.slice(0, 10).join(', ')}`)
             }
+            if (/установленная копия|не является git-репозиторием/i.test(failure)) details.push(t('choosePublishHint'))
             setActionResult({
               ok: false,
-              title: String(commit?.message ?? t('commitFailed')),
+              title: failure,
               details,
               output: typeof commit?.output === 'string' ? commit.output : '',
               truncated: false,
@@ -605,7 +615,7 @@ function ChangesCard() {
             ok,
             title: ok ? t('pushed') : `${t('commitCreated')} ✓ / ${t('pushFailed')}`,
             details: [
-              `${t('repoLabel')}: ${commit?.repo ?? '—'}${commit?.branch ? ` (${commit.branch})` : ''}`,
+              `${t('repoLabel')}: ${commit?.repoPath ?? commit?.repo ?? '—'}${commit?.branch ? ` (${commit.branch})` : ''}`,
               `${t('commitCreated')}: ${commit?.hash ?? commit?.commit ?? '—'}; ${t('filesCount')}: ${commit?.total ?? (Array.isArray(commit?.files) ? commit.files.length : 0)}`,
               `${t('remoteLabel')}: ${push?.remote ?? '—'}; ${t('branchLabel')}: ${push?.branch ?? '—'}; ${t('codeLabel')}: ${push?.exitCode ?? '—'}`,
               ...ok ? [] : [String(push?.message ?? '')],
@@ -616,10 +626,14 @@ function ChangesCard() {
           setPending(null)
           await load()
         } catch (cause) {
+          const details = []
+          if (pending.repoPath !== '' || pending.repo !== '') {
+            details.push(`${t('repoLabel')}: ${pending.repoPath || pending.repo}${pending.branch !== '' ? ` (${pending.branch})` : ''}`)
+          }
           setActionResult({
             ok: false,
             title: String(cause?.message ?? cause),
-            details: pending.repo !== '' ? [`${t('repoLabel')}: ${pending.repo}${pending.branch !== '' ? ` (${pending.branch})` : ''}`] : [],
+            details,
             output: '',
             truncated: false,
           })
@@ -707,8 +721,9 @@ function ChangesCard() {
             h(
               'span',
               { style: { fontSize: 12.5, fontWeight: 600 } },
-              `${t('confirmCommitPush')} ${t('repoLabel')}: ${pending.repo || '—'}${pending.branch !== '' ? ` (${pending.branch})` : ''} — ${pending.total} ${t('filesCount')}`,
+              `${t('confirmCommitPush')} ${pending.total} ${t('filesCount')}${pending.branch !== '' ? ` (${pending.branch})` : ''}`,
             ),
+            h('span', { style: S.muted }, `${t('repoLabel')}: ${pending.repoPath || pending.repo || '—'}`),
             h('span', { style: S.muted }, `${t('projectDirResult')}: ${dirLabel(pending.dir)}`),
             ...pending.warnings.map((line, index) => h('span', { key: `warning-${index}`, style: { fontSize: 12, color: '#d1242f' } }, line)),
             h(

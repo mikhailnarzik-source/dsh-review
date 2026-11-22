@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Changes review",
-    "description": "Per-directory review: uncommitted files, tests, and commit/push in the selected directory's git repository — with timeouts and secret-file guards, without leaving DSH.",
+    "description": "Per-directory review: tests and commit/push only in the selected directory's own git repository — with file counting, timeouts and readable git errors, without leaving DSH.",
     "detail": "docs/DETAIL.md"
   }
 }

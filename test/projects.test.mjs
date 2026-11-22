@@ -195,3 +195,29 @@ test('runTests: кандидатов нет — подсказка с указа
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('detectProjects: установленные копии plugins/* исключены, .publish и mobile-app остаются', async () => {
+  const gradleWrapper = process.platform === 'win32' ? 'gradlew.bat' : 'gradlew'
+  const root = await makeRoot({
+    plugins: {
+      'dsh-cards': { 'package.json': pkg('dsh-cards-copy') },
+      'dsh-review': { 'package.json': pkg('dsh-review-copy') },
+    },
+    '.publish': {
+      'dsh-cards': { 'package.json': pkg('dsh-cards') },
+    },
+    'mobile-app': {
+      android: { [gradleWrapper]: '' },
+    },
+  })
+  try {
+    const candidates = detectProjects(root)
+    const rels = candidates.map(candidate => candidate.rel)
+    assert.ok(!rels.some(rel => rel === 'plugins' || rel.startsWith('plugins/')), `plugins/* не должен попадать в список: ${rels.join(', ')}`)
+    assert.ok(rels.includes('.publish/dsh-cards'))
+    assert.ok(rels.includes('mobile-app/android'))
+    assert.equal(candidates.find(candidate => candidate.rel === '.publish/dsh-cards')?.label, 'dsh-cards')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
