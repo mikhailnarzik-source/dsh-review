@@ -1,6 +1,6 @@
 {
   "name": "dsh-review",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Обзор изменений, тесты, коммит/push, ветка/ahead-behind и создание GitHub PR — без выхода из DSH",
   "type": "module",
   "license": "MIT",

@@ -4,6 +4,9 @@
  * Страница плагина: в центрированном контейнере — проект с тестами, файлы с
  * незакоммиченными изменениями, построчный diff, откат одного файла, тесты,
  * коммит с push и создание PR.
+ * Тот же экран регистрируется как собственная панель в левой меню (`main` +
+ * `sidebar.panellist`, ключ `plugin-review`): клик по иконке открывает настройки,
+ * а не страницу плагин-менеджера.
  * Данные приходят с host-части через POST-маршруты.
  */
 window.__ModuleLoader__.load({
@@ -26,9 +29,27 @@ window.__ModuleLoader__.load({
     const PUSH_PATH = '/api/dsh-review/git-push'
     const BRANCH_INFO_PATH = '/api/dsh-review/branch-info'
     const PR_CREATE_PATH = '/api/dsh-review/pr-create'
+    /**
+     * Панель в левой панели: ключ `main` и id строки `sidebar.panellist`
+     * совпадают (`plugin-review`) — хост открывает страницу по этому id.
+     * `PANEL_ORDER` — позиция в общем списке панелей «Оформления интерфейса»
+     * (20 + индекс: карточки 0, сжатие 1, ревью 2, …).
+     */
+    const PANEL_ID = 'plugin-review'
+    const PANEL_EMOJI = '📝'
+    const PANEL_ORDER = 22
+    /**
+     * id плагина в состоянии видимости панелей: его ведёт «Оформление
+     * интерфейса» (`dsh-polish`) в localStorage. Пока состояния нет или оно
+     * битое, панель считаем закреплённой — так же, как в настройках оформления.
+     */
+    const PANEL_STATE_ID = 'review'
+    const PANEL_STATE_KEY = 'dsh-polish:panel-visibility'
+    const PANELS_CHANGED_EVENT = 'dsh-polish:panels-changed'
 
     const en = {
       title: 'Changes review',
+      panelSubtitle: 'Changes, tests, commit and pull request.',
       heading: 'Changes review',
       hint: 'Uncommitted files of this project: line diff and reverting a single file.',
       open: 'Open',
@@ -113,6 +134,7 @@ window.__ModuleLoader__.load({
     }
     const ru = {
       title: 'Ревью изменений',
+      panelSubtitle: 'Изменения, тесты, коммит и pull request.',
       heading: 'Ревью изменений',
       hint: 'Незакоммиченные файлы проекта: построчный diff и откат одного файла.',
       open: 'Открыть',
@@ -282,6 +304,7 @@ window.__ModuleLoader__.load({
         lineHeight: 1.55,
         color: 'var(--dsw-alias-label-primary)',
       },
+      body: { display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 },
       head: { display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' },
       icon: {
         boxSizing: 'border-box',
@@ -611,7 +634,13 @@ window.__ModuleLoader__.load({
     }
 
 
-function ChangesCard() {
+    /**
+     * Страница настроек: на странице плагина рисует себя целиком (шапка, карточки),
+     * а в панели левого меню — только содержимое (`bare`), потому что шапку и
+     * отступы даёт `ReviewPanelPage`.
+     */
+    function ChangesCard(props) {
+      const bare = props?.bare === true
       const t = (key) => translate(key)
       const [open, setOpen] = React.useState(true)
       const [state, setState] = React.useState(null)
@@ -1251,27 +1280,37 @@ function ChangesCard() {
             ? (Number(state.total) === 0 ? t('statusClean') : `${t('statusChanges')}: ${state.total}`)
             : t('statusIdle')
 
-      const blocks = [
-        h('style', { key: 'page-css' }, PAGE_CSS),
-        h(PageHeader, {
-          key: 'page-head',
-          icon: '📝',
-          title: t('heading'),
-          subtitle: t('hint'),
-          chipLabel,
-          chipTone,
-          refreshLabel: loading ? t('loading') : t('refresh'),
-          onRefresh: () => {
-            void load()
-            void loadProjects()
-            void loadBranchInfo()
-          },
-          open,
-          onToggle: () => setOpen(!open),
-        }),
-      ]
+      const blocks = bare
+        ? []
+        : [
+            h('style', { key: 'page-css' }, PAGE_CSS),
+            h(PageHeader, {
+              key: 'page-head',
+              icon: '📝',
+              title: t('heading'),
+              subtitle: t('hint'),
+              chipLabel,
+              chipTone,
+              refreshLabel: loading ? t('loading') : t('refresh'),
+              onRefresh: () => {
+                void load()
+                void loadProjects()
+                void loadBranchInfo()
+              },
+              open,
+              onToggle: () => setOpen(!open),
+            }),
+          ]
 
-      if (!open) return h('div', { className: 'dshrv-page', style: UI.page }, blocks)
+      if (!open) {
+        return h(
+          'div',
+          bare
+            ? { className: 'dshrv-page-body', style: UI.body }
+            : { className: 'dshrv-page', style: UI.page },
+          blocks,
+        )
+      }
 
       blocks.push(
         error !== ''
@@ -1429,7 +1468,140 @@ function ChangesCard() {
         ),
       )
 
-      return h('div', { className: 'dshrv-page', style: UI.page }, blocks)
+      return h(
+        'div',
+        bare
+          ? { className: 'dshrv-page-body', style: UI.body }
+          : { className: 'dshrv-page', style: UI.page },
+        blocks,
+      )
+    }
+
+    /** Заголовок панели: эмодзи-иконка, название плагина и короткий подзаголовок. */
+    function PanelHeader() {
+      return h(
+        'div',
+        { className: 'dshrv-panel-head', style: UI.head },
+        h('span', { style: UI.icon, 'aria-hidden': 'true' }, PANEL_EMOJI),
+        h(
+          'div',
+          { style: UI.headText },
+          h('h1', { style: UI.title }, translate('title')),
+          h('p', { style: UI.subtitle }, translate('panelSubtitle')),
+        ),
+      )
+    }
+
+    /**
+     * Главная панель плагина: та же страница настроек в центрированной колонке
+     * (maxWidth 960), но без страницы плагин-менеджера — только шапка плагина и
+     * его элементы управления.
+     */
+    function ReviewPanelPage() {
+      return h(
+        'section',
+        { className: 'dshrv-page', style: UI.page, 'aria-label': translate('title'), 'data-dsh-panel': PANEL_ID },
+        h('style', { key: 'page-css' }, PAGE_CSS),
+        h(PanelHeader, { key: 'panel-head' }),
+        h(ChangesCard, { key: 'settings', bare: true }),
+      )
+    }
+
+    /** Иконка строки левой панели: эмодзи в размер, который просит хост. */
+    function PanelIcon(props) {
+      const requested = Number(props?.size)
+      const size = Number.isFinite(requested) && requested > 0 ? requested : 16
+      return h(
+        'span',
+        {
+          'data-dsh-panel-icon': PANEL_STATE_ID,
+          'aria-hidden': true,
+          style: {
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: size,
+            height: size,
+            fontSize: Math.round(size * 0.95),
+            lineHeight: 1,
+          },
+        },
+        PANEL_EMOJI,
+      )
+    }
+
+    /** Закреплена ли панель: состояние ведёт «Оформление интерфейса» (dsh-polish). */
+    function isPanelPinned() {
+      try {
+        if (typeof localStorage === 'undefined' || localStorage === null) return true
+        const raw = localStorage.getItem(PANEL_STATE_KEY)
+        // Пока оформление не сохраняло состояние, все панели видны и закреплены.
+        if (raw === null || raw === '') return true
+        const state = JSON.parse(raw)
+        if (!Array.isArray(state?.pinned)) return true
+        return state.pinned.includes(PANEL_STATE_ID) || state.pinned.includes(PANEL_ID)
+      } catch {
+        return true
+      }
+    }
+
+    /**
+     * Панель в левой панели: `main` регистрируется всегда (она есть и в меню
+     * «Ещё»), строка `sidebar.panellist` — только когда панель закреплена.
+     * Событие `dsh-polish:panels-changed` приходит из «Оформления интерфейса»
+     * после закрепления/открепления: перечитываем состояние и перерегистрируем
+     * строку, сняв прошлую регистрацию.
+     */
+    function registerPanels(ctx) {
+      try {
+        ctx.slots.inject('main', () =>
+          ctx.slots.register({ name: 'main', key: PANEL_ID }, ReviewPanelPage),
+        )
+      } catch (error) {
+        console.error('[dsh-review] панель в левом меню недоступна:', error)
+      }
+
+      let disposeSidebar = null
+      const syncSidebar = () => {
+        if (typeof disposeSidebar === 'function') {
+          try {
+            disposeSidebar()
+          } catch (error) {
+            console.error('[dsh-review] не удалось снять строку левой панели:', error)
+          }
+          disposeSidebar = null
+        }
+        if (!isPanelPinned()) return
+        try {
+          let dispose = null
+          const outer = ctx.slots.inject('sidebar.panellist', () => {
+            dispose = ctx.slots.register(
+              {
+                name: 'sidebar.panellist',
+                id: PANEL_ID,
+                order: PANEL_ORDER,
+                label: () => translate('title'),
+                locale: NS,
+              },
+              PanelIcon,
+            )
+            return dispose
+          })
+          disposeSidebar = typeof dispose === 'function' ? dispose : outer
+        } catch (error) {
+          disposeSidebar = null
+          console.error('[dsh-review] строка в левой панели недоступна:', error)
+        }
+      }
+      syncSidebar()
+
+      try {
+        if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+          window.addEventListener(PANELS_CHANGED_EVENT, syncSidebar)
+        }
+      } catch (error) {
+        console.error('[dsh-review] событие панелей недоступно:', error)
+      }
     }
 
     /** Содержимое карточки на странице своего плагина. */
@@ -1449,8 +1621,10 @@ function ChangesCard() {
       ctx.locale.register(NS, { en, ru })
       translate = ctx.locale.bind(NS)
 
+      // Панель в левом меню: main — всегда, строка sidebar — только если закреплена.
+      registerPanels(ctx)
+
       try {
-              try {
         ctx.slots.inject('plugins.detail.section', () =>
           ctx.slots.register(
             {
@@ -1464,9 +1638,6 @@ function ChangesCard() {
         )
       } catch (error) {
         console.error('[dsh-review] секция страницы недоступна:', error)
-      }
-      } catch (error) {
-        console.error('[dsh-review] карточка недоступна:', error)
       }
     }
 
